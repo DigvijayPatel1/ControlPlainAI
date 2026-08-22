@@ -1,0 +1,327 @@
+openapi: 3.0.3
+info:
+  title: ControlPlane AI API
+  description: >
+    Real-time guardrail proxy for LLM traffic. Intercepts prompts and responses,
+    evaluates them for performance, cost, and safety, and applies an enforcement
+    action (allow, mask, block, or human review).
+  version: 0.1.0
+
+servers:
+  - url: http://localhost:8000
+    description: Local development
+
+tags:
+  - name: chat
+    description: Guardrailed LLM proxy endpoint
+  - name: admin
+    description: Dashboard and analytics APIs
+  - name: review
+    description: Human-in-the-loop review queue
+  - name: health
+    description: Service health
+
+paths:
+  /v1/chat/completions:
+    post:
+      tags: [chat]
+      summary: Proxy a chat completion request through the guardrail pipeline
+      security:
+        - ApiKeyAuth: []
+        - EntraTokenAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatCompletionRequest'
+      responses:
+        '200':
+          description: Guardrailed response, either passed through or auto-corrected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionResponse'
+        '202':
+          description: Response withheld pending human review
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingReviewResponse'
+        '403':
+          description: Request or response blocked by policy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlockedResponse'
+        '429':
+          description: Budget or rate limit exceeded
+
+  /v1/admin/requests:
+    get:
+      tags: [admin]
+      summary: List logged requests with their verdicts
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: verdict
+          in: query
+          schema:
+            $ref: '#/components/schemas/Verdict'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated request log
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RequestLogEntry'
+                  next_cursor:
+                    type: string
+                    nullable: true
+
+  /v1/admin/analytics/summary:
+    get:
+      tags: [admin]
+      summary: Aggregate metrics for the Security Centre dashboard
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Summary metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalyticsSummary'
+
+  /v1/review/queue:
+    get:
+      tags: [review]
+      summary: List items awaiting human review
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Review queue items
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReviewItem'
+
+  /v1/review/{review_id}/decision:
+    post:
+      tags: [review]
+      summary: Approve, edit, or override a flagged response
+      security:
+        - ApiKeyAuth: []
+      parameters:
+        - name: review_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewDecisionRequest'
+      responses:
+        '200':
+          description: Decision recorded and response released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionResponse'
+
+  /health:
+    get:
+      tags: [health]
+      summary: Liveness and dependency check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  mongo:
+                    type: string
+                    example: connected
+                  redis:
+                    type: string
+                    example: connected
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    EntraTokenAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Verdict:
+      type: string
+      enum: [pass, mask, block, review]
+
+    ChatCompletionRequest:
+      type: object
+      required: [messages]
+      properties:
+        model:
+          type: string
+          example: auto
+          description: "'auto' lets the model router choose small vs. large model"
+        messages:
+          type: array
+          items:
+            type: object
+            properties:
+              role:
+                type: string
+                enum: [system, user, assistant]
+              content:
+                type: string
+        context:
+          type: string
+          description: Optional grounding context used for the performance/hallucination check
+        stream:
+          type: boolean
+          default: false
+
+    ChatCompletionResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        model_used:
+          type: string
+        content:
+          type: string
+        corrections_applied:
+          type: array
+          items:
+            type: string
+          example: ["pii_redacted", "format_fixed"]
+        usage:
+          type: object
+          properties:
+            prompt_tokens:
+              type: integer
+            completion_tokens:
+              type: integer
+            cost_usd:
+              type: number
+
+    PendingReviewResponse:
+      type: object
+      properties:
+        review_id:
+          type: string
+        status:
+          type: string
+          example: pending_review
+        reason:
+          type: string
+
+    BlockedResponse:
+      type: object
+      properties:
+        verdict:
+          type: string
+          example: block
+        reason:
+          type: string
+        replacement_message:
+          type: string
+
+    RequestLogEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        principal_id:
+          type: string
+          description: Virtual API key or Entra-enrolled extension identity
+        prompt:
+          type: string
+        response:
+          type: string
+        verdict:
+          $ref: '#/components/schemas/Verdict'
+        latency_ms:
+          type: integer
+        cost_usd:
+          type: number
+
+    AnalyticsSummary:
+      type: object
+      properties:
+        total_requests:
+          type: integer
+        block_rate:
+          type: number
+        avg_latency_ms:
+          type: number
+        total_cost_usd:
+          type: number
+        cost_saved_by_routing_usd:
+          type: number
+        cache_hit_rate:
+          type: number
+
+    ReviewItem:
+      type: object
+      properties:
+        review_id:
+          type: string
+        prompt:
+          type: string
+        proposed_response:
+          type: string
+        flagged_reason:
+          type: string
+        risk_score:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+
+    ReviewDecisionRequest:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [approve, edit, override]
+        edited_content:
+          type: string
+          description: Required when action is 'edit' or 'override'
