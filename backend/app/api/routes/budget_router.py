@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_principal
+from backend.app.api.deps import get_current_principal
 from app.core.database import get_db
 from app.models.api_key import ApiKey
 from app.services.budget_service import budget_service
