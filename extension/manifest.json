@@ -1,0 +1,38 @@
+{
+    "manifest_version": 3,
+    "name": "ControlPlane AI",
+    "version": "1.0.0",
+    "description": "AI safety, cost, and observability controls.",
+    "permissions": [
+        "storage",
+        "tabs"
+    ],
+    "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "http://localhost:8000/*",
+    "http://127.0.0.1:8000/*"
+    ],
+    "background": {
+        "service_worker": "background/service_worker.js"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://chatgpt.com/*",
+                "https://chat.openai.com/*"
+            ],
+            "js": [
+                "content/content.js"
+            ],
+            "css": [
+                "content/floating_button.css"
+            ],
+            "run_at": "document_idle"
+        }
+    ],
+    "action": {
+        "default_title": "ControlPlane AI",
+        "default_popup": "popup/popup.html"
+    }
+}
