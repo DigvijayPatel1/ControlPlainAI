@@ -125,6 +125,11 @@ class RequestLog(Base, TimestampMixin):
         Float, 
         default=0.0
     )
+
+    original_prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    optimized_prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_saved: Mapped[int] = mapped_column(Integer, default=0)
+    savings_usd: Mapped[float] = mapped_column(Float, default=0.0)
     
     cache_hit: Mapped[bool] = mapped_column(
         Boolean, 

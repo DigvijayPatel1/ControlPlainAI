@@ -17,11 +17,11 @@ class Base(DeclarativeBase):
 DATABASE_URL = settings.DATABASE_URL
 
 
-engine = create_async_engine(
-    DATABASE_URL,
-    echo=settings.DEBUG,
-    future=True,
-)
+try:
+    engine = create_async_engine(DATABASE_URL, echo=settings.DEBUG, future=True)
+except ModuleNotFoundError:
+    # Keep pure unit-test imports usable when optional database drivers are absent.
+    engine = None
 
 
 AsyncSessionLocal = async_sessionmaker(
@@ -32,6 +32,9 @@ AsyncSessionLocal = async_sessionmaker(
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+
+    if engine is None:
+        raise RuntimeError("The configured database driver is not installed.")
 
     async with AsyncSessionLocal() as session:
         try:

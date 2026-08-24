@@ -30,6 +30,12 @@ class PrincipalType(str, enum.Enum):
     EXTENSION = "extension"          # Entra-enrolled browser extension
 
 
+class UserRole(str, enum.Enum):
+    USER = "user"
+    REVIEWER = "reviewer"
+    ADMIN = "admin"
+
+
 class ChatbotCategory(str, enum.Enum):
     CUSTOMER_SUPPORT = "customer_support"
     INTERNAL_EMPLOYEE = "internal_employee"
