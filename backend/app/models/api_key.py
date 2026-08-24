@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
-from app.models.common import ChatbotCategory, PrincipalType, SecurityPolicy, TimestampMixin
+from app.models.common import ChatbotCategory, PrincipalType, SecurityPolicy, TimestampMixin, UserRole
 
 
 class ApiKey(Base, TimestampMixin):
@@ -88,4 +88,8 @@ class ApiKey(Base, TimestampMixin):
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), 
         nullable=True
+    )
+
+    role: Mapped[UserRole] = mapped_column(
+        PG_ENUM(UserRole, name="user_role"), default=UserRole.USER, nullable=False
     )

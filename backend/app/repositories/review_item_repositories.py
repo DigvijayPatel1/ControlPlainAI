@@ -47,7 +47,11 @@ async def get_by_id(
     review_id: UUID
 ) -> ReviewItem | None:
     
-    stmt = select(ReviewItem).where(ReviewItem.id == review_id)
+    stmt = (
+        select(ReviewItem)
+        .where(ReviewItem.id == review_id)
+        .with_for_update()
+    )
     result = await db.execute(stmt)
     
     return result.scalar_one_or_none()

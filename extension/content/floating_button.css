@@ -1,0 +1,23 @@
+#controlplane-ai-button {
+    position: fixed;
+    right: 18px;
+    bottom: 110px;
+    width: 42px;
+    height: 42px;
+    border: 0;
+    border-radius: 50%;
+    background: #1d2a22;
+    color: #b7e6c2;
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+    z-index: 2147483647;
+    box-shadow: 0 4px 16px #0004;
+    font: 700 11px 'Space Mono', monospace;
+    transition: transform .15s ease, box-shadow .15s ease;
+}
+
+#controlplane-ai-button:hover {
+    transform: scale(1.08);
+    box-shadow: 0 6px 22px #0006;
+}

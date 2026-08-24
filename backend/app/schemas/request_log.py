@@ -16,6 +16,7 @@ class ChatCompletionRequest(BaseModel):
     model: str = "auto"                      # "auto" lets the model router decide
     messages: list[ChatMessage]
     context: Optional[str] = None             # grounding context for hallucination checks
+    expected_format: str | None = None
     stream: bool = False
 
 
@@ -23,6 +24,10 @@ class UsageOut(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     cost_usd: float
+    original_prompt_tokens: int = 0
+    optimized_prompt_tokens: int = 0
+    tokens_saved: int = 0
+    savings_usd: float = 0.0
 
 
 class ChatCompletionResponse(BaseModel):
@@ -61,6 +66,10 @@ class RequestLogEntry(BaseModel):
     verdict: Verdict
     latency_ms: int
     cost_usd: float
+    original_prompt_tokens: int = 0
+    optimized_prompt_tokens: int = 0
+    tokens_saved: int = 0
+    savings_usd: float = 0.0
 
 
 class AnalyticsSummary(BaseModel):
@@ -68,5 +77,10 @@ class AnalyticsSummary(BaseModel):
     block_rate: float
     avg_latency_ms: float
     total_cost_usd: float
-    cost_saved_by_routing_usd: float
+    cost_saved_by_routing_usd: float = 0.0
     cache_hit_rate: float
+    blocked_requests: int = 0
+    review_requests: int = 0
+    cost_saved_usd: float = 0.0
+    tokens_saved: int = 0
+    cache_hits: int = 0
