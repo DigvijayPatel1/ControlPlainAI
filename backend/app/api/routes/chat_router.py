@@ -9,7 +9,7 @@ from dataclasses import replace
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.api.deps import enforce_budget
+from app.api.deps import enforce_budget
 from app.core.config import settings
 from app.core.database import get_db
 from app.guardrails.contracts import PipelineResult

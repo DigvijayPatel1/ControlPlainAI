@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.api.deps import require_reviewer
+from app.api.deps import require_reviewer
 from app.core.database import get_db
 from app.models.api_key import ApiKey
 from app.models.common import ReviewAction
