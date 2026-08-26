@@ -20,35 +20,39 @@ export default function OverviewPage() {
 
     return (
         <>
-            <header className="topbar">
-                <div>
-                    <p className="eyebrow">SECURITY CENTRE / 01</p>
-                    <h1>Overview</h1>
-                    <p className="muted">Guardrails, spend, and review operations in one quiet place.</p>
-                </div>
+            <header className="mb-6">
+                <p className="font-mono text-xs tracking-widest text-muted uppercase">Security centre / 01</p>
+                <h1 className="mt-1 text-2xl font-semibold text-ink">Overview</h1>
+                <p className="mt-1 text-sm text-muted">Guardrails, spend, and review operations in one quiet place.</p>
             </header>
 
-            {summaryError && <div className="notice">Couldn't load analytics yet — send a few requests through the guardrail API first.</div>}
+            {summaryError && (
+                <div className="mb-6 rounded-xl border border-brand-amber/30 bg-amber-50 px-4 py-3 text-sm text-brand-amber">
+                    Couldn't load analytics yet — send a few requests through the guardrail API first.
+                </div>
+            )}
 
-            <ApiKeyCard />
+            <div className="mb-6">
+                <ApiKeyCard />
+            </div>
 
-            <div className="metrics">
+            <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
                 <Metric label="Requests" value={data.total_requests} />
                 <Metric label="Blocked" value={data.blocked_requests} tone="danger" />
                 <Metric label="Pending reviews" value={data.review_requests} tone="amber" />
                 <Metric label="Total cost" value={`$${data.total_cost_usd.toFixed(4)}`} />
             </div>
 
-            <div className="grid-two">
+            <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
                 <Panel title="Efficiency">
-                    <div className="efficiency">
+                    <div className="grid grid-cols-3 gap-3">
                         <Metric label="Tokens saved" value={data.tokens_saved} />
                         <Metric label="Cache hit rate" value={`${(data.cache_hit_rate * 100).toFixed(1)}%`} />
                         <Metric label="Avg latency" value={`${Math.round(data.avg_latency_ms)} ms`} />
                     </div>
                 </Panel>
                 <Panel title="Spend">
-                    <div className="efficiency">
+                    <div className="grid grid-cols-2 gap-3">
                         <Metric label="Prompt savings" value={`$${data.cost_saved_usd.toFixed(4)}`} tone="green" />
                         <Metric label="Cache hits" value={data.cache_hits} />
                     </div>
