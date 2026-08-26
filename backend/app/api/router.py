@@ -7,9 +7,11 @@ from app.api.routes.analytics_router import router as analytics_router
 from app.api.routes.chat_router import router as chat_router
 from app.api.routes.budget_router import router as budget_router
 from app.api.routes.human_reviews_router import router as human_reviews_router
+from app.api.routes.auth_router import router as auth_router
 
 api_router = APIRouter()
 
+api_router.include_router(auth_router)
 api_router.include_router(guardrail_router)
 api_router.include_router(request_router)
 api_router.include_router(review_router)

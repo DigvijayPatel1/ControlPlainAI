@@ -1,6 +1,7 @@
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
@@ -9,25 +10,34 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 
-
 class Base(DeclarativeBase):
     pass
 
 
-DATABASE_URL = settings.DATABASE_URL
+DATABASE_URL = str(settings.DATABASE_URL)
 
 
-try:
-    engine = create_async_engine(DATABASE_URL, echo=settings.DEBUG, future=True)
-except ModuleNotFoundError:
-    # Keep pure unit-test imports usable when optional database drivers are absent.
-    engine = None
+def setup_engine() -> AsyncEngine | None:
+    try:
+        return create_async_engine(
+            DATABASE_URL,
+            echo=settings.DEBUG,    
+            future=True,
+            pool_size=20,           
+            max_overflow=10,        
+            pool_pre_ping=True,     
+            pool_recycle=3600,      
+        )
+    except ModuleNotFoundError:
+        return None
 
+engine = setup_engine()
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
     expire_on_commit=False,
+    autoflush=False,
 )
 
 
@@ -39,7 +49,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         try:
             yield session
-            await session.commit()
 
         except Exception:
             await session.rollback()

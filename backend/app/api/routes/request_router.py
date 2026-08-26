@@ -6,7 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_principal
 from app.core.database import get_db
+from app.models.api_key import ApiKey
+from app.models.common import UserRole
 from app.models.request_log import RequestLog
 from app.models.review_item import ReviewItem
 
@@ -17,13 +20,14 @@ router = APIRouter(prefix="/api/requests", tags=["Requests"])
 async def list_requests(
     limit: int = Query(default=50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    principal: ApiKey = Depends(get_current_principal),
 ):
-    result = await db.execute(
-        select(RequestLog)
-        .order_by(RequestLog.created_at.desc())
-        .limit(limit)
-    )
+    stmt = select(RequestLog).order_by(RequestLog.created_at.desc()).limit(limit)
 
+    if principal.role != UserRole.ADMIN:
+        stmt = stmt.where(RequestLog.principal_id == principal.principal_id)
+
+    result = await db.execute(stmt)
     rows = result.scalars().all()
 
     return {
@@ -32,9 +36,7 @@ async def list_requests(
                 "id": str(row.id),
                 "principal_id": row.principal_id,
                 "model_used": row.model_used,
-                "verdict": row.verdict.value
-                if hasattr(row.verdict, "value")
-                else row.verdict,
+                "verdict": row.verdict.value if hasattr(row.verdict, "value") else row.verdict,
                 "prompt_tokens": row.prompt_tokens,
                 "completion_tokens": row.completion_tokens,
                 "cost_usd": row.cost_usd,
@@ -50,9 +52,11 @@ async def list_requests(
 async def get_request(
     request_id: UUID,
     db: AsyncSession = Depends(get_db),
+    principal: ApiKey = Depends(get_current_principal),
 ):
     result = await db.execute(
-        select(RequestLog).where(RequestLog.id == request_id)
+        select(RequestLog)
+        .where(RequestLog.id == request_id)
     )
 
     request = result.scalar_one_or_none()
@@ -61,6 +65,12 @@ async def get_request(
         raise HTTPException(
             status_code=404,
             detail="Request not found.",
+        )
+
+    if principal.role != UserRole.ADMIN and request.principal_id != principal.principal_id:
+        raise HTTPException(
+            status_code=404, 
+            detail="Request not found."
         )
 
     review_result = await db.execute(
@@ -75,9 +85,7 @@ async def get_request(
         "id": str(request.id),
         "principal_id": request.principal_id,
         "model_used": request.model_used,
-        "verdict": request.verdict.value
-        if hasattr(request.verdict, "value")
-        else request.verdict,
+        "verdict": request.verdict.value if hasattr(request.verdict, "value") else request.verdict,
         "prompt_tokens": request.prompt_tokens,
         "completion_tokens": request.completion_tokens,
         "cost_usd": request.cost_usd,
@@ -86,11 +94,11 @@ async def get_request(
             {
                 "id": str(review.id),
                 "request_log_id": str(review.request_log_id),
-                "input_text": review.input_text,
-                "output_text": review.output_text,
-                "reason": review.reason,
-                "score": review.score,
-                "blocked": review.blocked,
+                "prompt": review.prompt,
+                "proposed_response": review.proposed_response,
+                "flagged_reason": review.flagged_reason,
+                "risk_score": review.risk_score,
+                "resolved": review.resolved,
                 "created_at": review.created_at,
             }
             for review in reviews
