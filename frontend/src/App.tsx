@@ -7,7 +7,7 @@ import RequestsPage from './features/dashboard/RequestsPage'
 import ReviewsPage from './features/dashboard/ReviewsPage'
 import SettingsPage from './features/dashboard/SettingsPage'
 import { ProtectedRoute, PublicOnlyRoute } from './components/RouteGuards'
-import './App.css'
+
 
 function App() {
     return (
