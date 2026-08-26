@@ -1,15 +1,10 @@
 from contextlib import asynccontextmanager
-from app.api.guardrail_router import router as guardrail_router
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
-from app.api.request_router import router as request_router
-from app.api.review_router import router as review_router
-from app.api.router import router
-from app.api.analytics_router import router as analytics_router
-from app.api.chat_router import router as chat_router
-from app.api.budget_router import router as budget_router
-from app.api.human_reviews_router import router as human_reviews_router
+
+from app.api.router import api_router
 
 from app.core.config import settings
 from app.core.logging import configure_logging
@@ -38,26 +33,23 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="ControlPlaneAI", version="1.0.0", lifespan=lifespan)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[settings.FRONTEND_ORIGIN, 
+                    "http://localhost:5173", 
+                    "http://127.0.0.1:5173"
+                    ],
     allow_origin_regex=r"chrome-extension://.*",
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.include_router(human_reviews_router)
-app.include_router(chat_router)
-app.include_router(budget_router)
-app.include_router(analytics_router)
-app.include_router(websocket_router)
-app.include_router(request_router)
-app.include_router(review_router)
-app.include_router(guardrail_router)
 
-@app.get("/")
-def read_root():
-    return {"Hello": "World"}
+# -------------------------------
+# API Routes
+# -------------------------------
+app.include_router(api_router)   
 
 
 @app.get("/health")

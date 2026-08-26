@@ -18,6 +18,19 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost:5432/controlplane"
 
     # ==================================================
+    # Auth / JWT
+    # ==================================================
+    JWT_SECRET_KEY: str = "dev-insecure-secret-change-me"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
+    DEFAULT_MONTHLY_BUDGET_USD: float = 25.0
+
+    # ==================================================
+    # CORS
+    # ==================================================
+    FRONTEND_ORIGIN: str = "http://localhost:5173"
+
+    # ==================================================
     # Pydantic Settings
     # ==================================================
     model_config = SettingsConfigDict(
