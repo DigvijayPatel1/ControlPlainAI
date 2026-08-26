@@ -2,37 +2,38 @@
     "manifest_version": 3,
     "name": "ControlPlane AI",
     "version": "1.0.0",
-    "description": "AI safety, cost, and observability controls.",
-    "permissions": [
-        "storage",
-        "tabs"
-    ],
+    "description": "AI safety, cost, and observability controls for your chat sessions.",
+    "permissions": ["storage", "tabs"],
     "host_permissions": [
-    "https://chatgpt.com/*",
-    "https://chat.openai.com/*",
-    "http://localhost:8000/*",
-    "http://127.0.0.1:8000/*"
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "http://localhost:8000/*",
+        "http://127.0.0.1:8000/*"
     ],
+    "externally_connectable": {
+        "matches": [
+            "http://localhost:5173/*",
+            "http://127.0.0.1:5173/*"
+        ]
+    },
     "background": {
-        "service_worker": "background/service_worker.js"
+        "service_worker": "service-worker.js",
+        "type": "module"
     },
     "content_scripts": [
         {
-            "matches": [
-                "https://chatgpt.com/*",
-                "https://chat.openai.com/*"
-            ],
-            "js": [
-                "content/content.js"
-            ],
-            "css": [
-                "content/floating_button.css"
-            ],
+            "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+            "js": ["content-main.js"],
             "run_at": "document_idle"
         }
     ],
     "action": {
         "default_title": "ControlPlane AI",
-        "default_popup": "popup/popup.html"
+        "default_popup": "index.html"
+    },
+    "icons": {
+        "16": "icons/icon16.png",
+        "48": "icons/icon48.png",
+        "128": "icons/icon128.png"
     }
 }
