@@ -22,13 +22,14 @@ class OpenAIProvider:
 
     def _get_client(self):
         if self._client is None:
-            if not settings.OPENAI_API_KEY:
+            api_key = settings.openai_api_key
+            if not api_key:
                 raise RuntimeError("OPENAI_API_KEY is not configured.")
             try:
                 from openai import AsyncOpenAI
             except ImportError as exc:
                 raise RuntimeError("OpenAI support is not installed.") from exc
-            self._client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+            self._client = AsyncOpenAI(api_key=api_key)
         return self._client
 
     async def generate(
