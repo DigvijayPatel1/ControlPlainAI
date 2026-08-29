@@ -16,7 +16,10 @@ chrome.runtime.onMessageExternal.addListener((message, _sender, sendResponse) =>
             sendResponse({ ok: false, error: 'Missing apiKey.' });
             return;
         }
-        chrome.storage.local.set({ apiKey, principalId: message.principalId ?? null, enabled: true }, () => sendResponse({ ok: true }));
+
+        chrome.storage.local.remove('openaiApiKey', () => {
+            chrome.storage.local.set({ apiKey, principalId: message.principalId ?? null, enabled: true }, () => sendResponse({ ok: true }));
+        });
         return true; // keep the channel open for the async storage callback
     }
 });
