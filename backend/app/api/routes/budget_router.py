@@ -5,9 +5,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_principal
+from app.api.deps import get_current_user
 from app.core.database import get_db
-from app.models.api_key import ApiKey
+from app.models.user import User
 from app.services.budget_service import budget_service
 
 router = APIRouter(prefix="/v1/budget", tags=["budget"])
@@ -16,9 +16,11 @@ router = APIRouter(prefix="/v1/budget", tags=["budget"])
 @router.get("")
 async def get_my_budget(
     db: AsyncSession = Depends(get_db),
-    principal: ApiKey = Depends(get_current_principal),
+    user: User = Depends(get_current_user),
 ) -> dict[str, object]:
-    budget = await budget_service.get_budget(db, principal.principal_id)
+    if not user.default_principal_id:
+        return {"configured": False}
+    budget = await budget_service.get_budget(db, user.default_principal_id)
     if budget is None:
         return {"configured": False}
     return {
