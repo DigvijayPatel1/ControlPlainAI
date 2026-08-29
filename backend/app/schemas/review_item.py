@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -38,3 +38,24 @@ class ReviewDecisionResult(BaseModel):
     action_taken: ReviewAction
     final_response: str
     resolved_by: str
+
+class ReviewItemResponse(BaseModel):
+    id: UUID
+    request_log_id: UUID
+    prompt: str
+    proposed_response: Optional[str] = None
+    flagged_reason: Optional[str] = None
+    risk_score: float
+    resolved: bool
+    resolved_at: Optional[datetime] = None
+    resolved_by: Optional[str] = None
+    action_taken: Any = None # Tip: Replace 'Any' with your actual Enum type if you have one
+    final_response: Optional[str] = None
+    created_at: datetime
+
+    # Instructs Pydantic to read properties from the SQLAlchemy ORM model
+    model_config = ConfigDict(from_attributes=True, use_enum_values=True)
+
+class ReviewListResponse(BaseModel):
+    items: List[ReviewItemResponse]
+    count: int

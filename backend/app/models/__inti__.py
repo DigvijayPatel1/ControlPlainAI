@@ -3,5 +3,6 @@ from app.models.review_item import ReviewItem
 from app.models.budget import Budget
 from app.models.api_key import ApiKey
 from app.models.user import User
+from app.models import check_result
 
-__all__ = ["RequestLog", "ReviewItem", "Budget", "ApiKey", "User"]
+__all__ = ["RequestLog", "ReviewItem", "Budget", "ApiKey", "User", "CheckResult"]
