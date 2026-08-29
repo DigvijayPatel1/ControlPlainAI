@@ -72,16 +72,17 @@ async def check_input(
 
     usage = result.usage
 
-    # evaluate_input() currently optimizes automatically.
-    # Therefore:
-    #
-    # result.content = optimized/sanitized content
-    #
-    # proposed_content is used when the pipeline needs to
-    # preserve the original content for review.
+    # `result.content` is the enforced/sanitized version (PII already
+    # redacted for MASK verdicts, optimized for others). It must always be
+    # what we hand back to the extension — echoing the raw request prompt
+    # here would defeat masking entirely.
     optimized_content = None
 
-    if (
+    if result.verdict.value == "mask":
+        # Always expose the redacted text for MASK verdicts, regardless of
+        # whether redaction also happened to save tokens.
+        optimized_content = result.content
+    elif (
         result.verdict.value not in {"block", "review"}
         and result.usage.tokens_saved > 0
     ):
@@ -89,7 +90,7 @@ async def check_input(
 
     return InputGuardrailResponse(
         verdict=result.verdict.value,
-        content=request.prompt,
+        content=result.content,
         model_used=result.model_used,
         risk_score=result.risk_score,
         reasons=result.reasons,
