@@ -76,6 +76,7 @@ async def _audit(db: AsyncSession, principal: ApiKey, original_prompt: str, cont
             corrections=check.corrections, metadata_json=metadata,
         ))
     await db.flush()
+    await db.commit()
     return log
 
 
@@ -100,6 +101,7 @@ async def chat_completion(
         if input_result.verdict is Verdict.BLOCK:
             try:
                 await budget_service.record_blocked_request(db=db, principal_id=principal.principal_id)
+                await db.commit()
             except BudgetNotFoundError:
                 pass
         elif input_result.proposed_content:
@@ -107,6 +109,7 @@ async def chat_completion(
                 db=db, request_log_id=log.id, prompt=original_prompt,
                 proposed_response=input_result.proposed_content, result=input_result,
             )
+            await db.commit()
             await notification_service.notify_review(
                 review_id=str(review.id), principal_id=principal.principal_id,
                 reason="; ".join(input_result.reasons), risk_score=input_result.risk_score,
@@ -127,6 +130,7 @@ async def chat_completion(
         )
         result.usage = replace(result.usage, cost_usd=0.0)
         log = await _audit(db, principal, original_prompt, request.context, cached, result, int((time.perf_counter() - started_at) * 1000))
+        await db.commit()
         return _to_response(log.id, result)
 
     estimated_cost = estimate_request_cost(
@@ -145,6 +149,7 @@ async def chat_completion(
             model_used=model, usage=input_result.usage,
         )
         log = await _audit(db, principal, original_prompt, request.context, "", blocked, int((time.perf_counter() - started_at) * 1000))
+        await db.commit()
         return _to_response(log.id, blocked)
 
     try:
@@ -164,11 +169,13 @@ async def chat_completion(
     )
     await budget_service.record_spend(db=db, principal_id=principal.principal_id, cost_usd=result.usage.cost_usd)
     log = await _audit(db, principal, original_prompt, request.context, provider_response.content, result, int((time.perf_counter() - started_at) * 1000))
+    await db.commit()
     if result.verdict is Verdict.REVIEW:
         review = await review_service.create_review(
             db=db, request_log_id=log.id, prompt=original_prompt,
             proposed_response=result.proposed_content or provider_response.content, result=result,
         )
+        await db.commit()
         await notification_service.notify_review(
             review_id=str(review.id), principal_id=principal.principal_id,
             reason="; ".join(result.reasons), risk_score=result.risk_score,
