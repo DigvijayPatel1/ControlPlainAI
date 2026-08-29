@@ -1,4 +1,6 @@
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
     # ==================================================
@@ -6,8 +8,8 @@ class Settings(BaseSettings):
     # ==================================================
     APP_NAME: str = "ControlPlane API"
     APP_ENV: str = "development"
-    DEBUG: bool = True 
-    OPENAI_API_KEY: str | None = None
+    DEBUG: bool = True
+    OPENAI_API_KEY: SecretStr | None = None
     OPENAI_MODEL: str = "gpt-4o-mini"
     MAX_COMPLETION_TOKENS: int = 1000
     REDIS_URL: str | None = None
@@ -20,7 +22,7 @@ class Settings(BaseSettings):
     # ==================================================
     # Auth / JWT
     # ==================================================
-    JWT_SECRET_KEY: str = "dev-insecure-secret-change-me"
+    JWT_SECRET_KEY: SecretStr = SecretStr("dev-insecure-secret-change-me")
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
     DEFAULT_MONTHLY_BUDGET_USD: float = 25.0
@@ -38,6 +40,16 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",
-    ) 
+        secrets_dir="/run/secrets",
+    )
+
+    @property
+    def openai_api_key(self) -> str | None:
+        return self.OPENAI_API_KEY.get_secret_value() if self.OPENAI_API_KEY else None
+
+    @property
+    def jwt_secret_key(self) -> str:
+        return self.JWT_SECRET_KEY.get_secret_value()
+
 
 settings = Settings()
