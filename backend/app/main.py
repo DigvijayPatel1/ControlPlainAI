@@ -34,13 +34,18 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="ControlPlaneAI", version="1.0.0", lifespan=lifespan)
 
+# In development, allow any localhost/127.0.0.1 port (Vite auto-picks a free
+# port, e.g. 5174, 5175, ... if 5173 is busy) plus the extension origin.
+# In production, only the explicitly configured FRONTEND_ORIGIN is allowed.
+if settings.APP_ENV == "development":
+    _cors_origin_regex = r"chrome-extension://.*|http://(localhost|127\.0\.0\.1):\d+"
+else:
+    _cors_origin_regex = r"chrome-extension://.*"
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_ORIGIN, 
-                    "http://localhost:5173", 
-                    "http://127.0.0.1:5173"
-                    ],
-    allow_origin_regex=r"chrome-extension://.*",
+    allow_origins=[settings.FRONTEND_ORIGIN],
+    allow_origin_regex=_cors_origin_regex,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
