@@ -13,7 +13,7 @@ from app.core.database import get_db
 from app.core.rate_limit import RateLimitExceeded, rate_limiter
 from app.core.security import API_KEY_PREFIX, decode_access_token, verify_api_key
 from app.models.api_key import ApiKey
-from app.models.common import PrincipalType, UserRole
+from app.models.common import PrincipalType
 from app.models.user import User
 from app.services.budget_service import BudgetExceededError, BudgetNotFoundError, budget_service
 from app.services.auth_service import UserNotFoundError, auth_service
@@ -144,24 +144,6 @@ def _assert_principal_usable(principal: ApiKey) -> None:
 
 
 # ==================================================
-# Dependency factory for enforcing API key roles
-# ==================================================
-def require_roles(*allowed_roles: UserRole):
-    async def dependency(principal: ApiKey = Depends(get_current_principal)) -> ApiKey:
-        if principal.role not in allowed_roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, 
-                detail="Insufficient permissions."
-            )
-        return principal
-    return dependency
-
-
-require_reviewer = require_roles(UserRole.REVIEWER, UserRole.ADMIN)
-require_admin = require_roles(UserRole.ADMIN)
-
-
-# ==================================================
 # Enforce rate limiting for the principal
 # ==================================================
 async def enforce_rate_limit(
@@ -206,14 +188,6 @@ async def enforce_budget(
 
 
 # ==================================================
-# Development placeholder for admin auth
-# ==================================================
-async def get_current_admin_dev() -> str:
-    """Development placeholder; replace with role-based admin authentication."""
-    return "admin-dev"
-
-
-# ==================================================
 # Authenticate dashboard user via JWT
 # ==================================================
 async def get_current_user(
@@ -249,18 +223,5 @@ async def get_current_user(
     return user
 
 
-# ==================================================
-# Dependency factory for dashboard user roles
-# ==================================================
-def require_user_roles(*allowed_roles: UserRole):
-    async def dependency(user: User = Depends(get_current_user)) -> User:
-        if user.role not in allowed_roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, 
-                detail="Insufficient permissions."
-            )
-        return user
-    return dependency
-
-
-require_admin_user = require_user_roles(UserRole.ADMIN)
+# Single-user app: the authenticated dashboard user is the only valid identity.
+require_reviewer = get_current_user
