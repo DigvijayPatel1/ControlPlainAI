@@ -34,14 +34,11 @@ export default function DashboardLayout() {
                     {navItems.map((item) => (<NavLink key={item.to} to={item.to} end={item.end} className={navLinkClasses}>
                             {item.label}
                         </NavLink>))}
-                    {user?.role === 'admin' && (<NavLink to="/admin" className={navLinkClasses}>
-                            Admin
-                        </NavLink>)}
                 </nav>
 
                 <div className="mt-6 border-t border-white/10 pt-4">
                     <p className="mb-3 text-sm text-white/80">
-                        {user?.full_name} <span className="text-xs text-white/40">({user?.role})</span>
+                        {user?.full_name}
                     </p>
                     <button type="button" onClick={handleLogout} className="w-full rounded-lg border border-white/15 py-2 text-sm font-medium text-white/80 transition-colors hover:bg-white/10 hover:text-white">
                         Sign out

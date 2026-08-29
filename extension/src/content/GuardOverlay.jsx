@@ -6,7 +6,7 @@ const STATUS_META = {
     idle: { label: 'ControlPlane', icon: 'CP', badge: 'bg-white/40', dot: 'bg-white/40' },
     checking: { label: 'Checking…', icon: '…', badge: 'bg-brand-amber', dot: 'bg-brand-amber' },
     pass: { label: 'Looks safe', icon: '✓', badge: 'bg-brand-green', dot: 'bg-brand-green' },
-    mask: { label: 'Optimized available', icon: '✨', badge: 'bg-brand-green', dot: 'bg-brand-green' },
+    mask: { label: 'Sensitive info redacted', icon: '✨', badge: 'bg-brand-amber', dot: 'bg-brand-amber' },
     review: { label: 'Sent for review', icon: '!', badge: 'bg-brand-amber', dot: 'bg-brand-amber' },
     block: { label: 'Blocked', icon: '✕', badge: 'bg-brand-red', dot: 'bg-brand-red' },
     error: { label: "Couldn't check", icon: '!', badge: 'bg-brand-red', dot: 'bg-brand-red' },
@@ -25,6 +25,15 @@ export default function GuardOverlay() {
         setError(event.error);
         setOptimized(false);
         setExpanded(event.status !== 'idle' && event.status !== 'checking');
+
+        // Sensitive data (email, phone, IP, etc.) must never be left for the
+        // user to accidentally send unredacted — apply the mask immediately
+        // rather than waiting for a manual "Optimize" click.
+        if (event.status === 'mask' && event.result?.optimized_content) {
+            if (setPrompt(event.result.optimized_content)) {
+                setOptimized(true);
+            }
+        }
     }), []);
     useEffect(() => {
         const applyState = (state) => {
@@ -37,7 +46,10 @@ export default function GuardOverlay() {
     const meta = STATUS_META[status];
     const showActions = status === 'pass' || status === 'mask';
     const hasSavings = Boolean(result && result.tokens_saved > 0);
-    const canOptimize = optimizationEnabled && hasSavings;
+    // Manual "Optimize" is only a cost-savings convenience for otherwise-safe
+    // ('pass') content. MASK content is redacted automatically above, so it
+    // never needs (or offers) an unredacted send path.
+    const canOptimize = status === 'pass' && optimizationEnabled && hasSavings;
     function handleOptimize() {
         if (result?.optimized_content && setPrompt(result.optimized_content)) {
             setOptimized(true);
@@ -92,7 +104,7 @@ export default function GuardOverlay() {
                                     ✨ Optimize &amp; keep editing
                                 </button>)}
                             <button type="button" onClick={handleSend} className="rounded-lg bg-sidebar px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-sidebar/90">
-                                {optimized ? 'Send optimized' : 'Send anyway'}
+                                {status === 'mask' ? 'Send redacted message' : optimized ? 'Send optimized' : 'Send anyway'}
                             </button>
                         </div>)}
                 </div>)}

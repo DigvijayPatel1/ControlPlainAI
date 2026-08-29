@@ -12,9 +12,3 @@ export function PublicOnlyRoute() {
         return <Navigate to="/" replace/>;
     return <Outlet />;
 }
-export function RoleRoute({ allow }) {
-    const user = useAppSelector((state) => state.auth.user);
-    if (!user || !allow.includes(user.role))
-        return <Navigate to="/" replace/>;
-    return <Outlet />;
-}
