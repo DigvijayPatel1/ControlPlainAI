@@ -12,6 +12,8 @@ from app.models.request_log import RequestLog
 from app.models.review_item import ReviewItem
 from app.models.budget import Budget
 from app.models.api_key import ApiKey
+from app.models.user import User
+from app.models import check_result
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
