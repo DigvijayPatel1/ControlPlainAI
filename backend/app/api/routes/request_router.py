@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_principal
 from app.core.database import get_db
 from app.models.api_key import ApiKey
-from app.models.common import UserRole
 from app.models.request_log import RequestLog
 from app.models.review_item import ReviewItem
 
@@ -22,10 +21,9 @@ async def list_requests(
     db: AsyncSession = Depends(get_db),
     principal: ApiKey = Depends(get_current_principal),
 ):
+    # Any authenticated user can see every request — there is no
+    # per-role visibility restriction.
     stmt = select(RequestLog).order_by(RequestLog.created_at.desc()).limit(limit)
-
-    if principal.role != UserRole.ADMIN:
-        stmt = stmt.where(RequestLog.principal_id == principal.principal_id)
 
     result = await db.execute(stmt)
     rows = result.scalars().all()
@@ -65,12 +63,6 @@ async def get_request(
         raise HTTPException(
             status_code=404,
             detail="Request not found.",
-        )
-
-    if principal.role != UserRole.ADMIN and request.principal_id != principal.principal_id:
-        raise HTTPException(
-            status_code=404, 
-            detail="Request not found."
         )
 
     review_result = await db.execute(
