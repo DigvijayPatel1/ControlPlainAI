@@ -18,6 +18,7 @@ from app.models.budget import Budget  # noqa: F401
 from app.models.check_result import RequestCheck  # noqa: F401
 from app.models.request_log import RequestLog  # noqa: F401
 from app.models.review_item import ReviewItem  # noqa: F401
+from app.models.user import User  # noqa: F401
 
 configure_logging(debug=settings.DEBUG)
 
