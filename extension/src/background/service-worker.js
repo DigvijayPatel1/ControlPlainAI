@@ -48,6 +48,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
         return true; // keep the channel open for the async fetch
     }
+    if (message.type === 'CHECK_OUTPUT') {
+        checkOutput(message.prompt, message.response, message.model || 'gpt-4o-mini')
+            .then((data) => sendResponse({ ok: true, data }))
+            .catch((error) => {
+            console.error('ControlPlane backend error:', error);
+            sendResponse({ ok: false, error: error.message });
+        });
+        return true; // keep the channel open for the async fetch
+    }
 });
 async function checkInput(prompt, model) {
     const state = await chrome.storage.local.get({ apiKey: '' });
@@ -65,4 +74,21 @@ async function checkInput(prompt, model) {
         throw new Error(`ControlPlane API ${response.status}: ${text}`);
     }
     return await response.json();
+}
+async function checkOutput(prompt, response, model) {
+    const state = await chrome.storage.local.get({ apiKey: '' });
+    const apiKey = state.apiKey?.trim();
+    if (!apiKey) {
+        throw new Error('ControlPlane API key is not configured. Connect the extension from the dashboard.');
+    }
+    const res = await fetch(`${API}/guardrails/output`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+        body: JSON.stringify({ prompt, response, model }),
+    });
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`ControlPlane API ${res.status}: ${text}`);
+    }
+    return await res.json();
 }

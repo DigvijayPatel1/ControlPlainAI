@@ -20,3 +20,25 @@ export function checkInput(prompt, model) {
         });
     });
 }
+
+/** Sends ChatGPT's rendered response (plus the prompt that produced it) to
+ * the background service worker for a post-generation guardrail check. */
+export function checkOutput(prompt, response, model) {
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({ type: 'CHECK_OUTPUT', prompt, response, model }, (result) => {
+            if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+                return;
+            }
+            if (!result) {
+                reject(new Error('No response from ControlPlane service worker.'));
+                return;
+            }
+            if (!result.ok) {
+                reject(new Error(result.error || 'ControlPlane request failed.'));
+                return;
+            }
+            resolve(result.data);
+        });
+    });
+}

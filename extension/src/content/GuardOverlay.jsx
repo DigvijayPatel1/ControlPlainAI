@@ -10,7 +10,14 @@ const STATUS_META = {
     review: { label: 'Sent for review', icon: '!', badge: 'bg-brand-amber', dot: 'bg-brand-amber' },
     block: { label: 'Blocked', icon: '✕', badge: 'bg-brand-red', dot: 'bg-brand-red' },
     error: { label: "Couldn't check", icon: '!', badge: 'bg-brand-red', dot: 'bg-brand-red' },
+    'checking-response': { label: 'Checking response…', icon: '…', badge: 'bg-brand-amber', dot: 'bg-brand-amber' },
+    'response-pass': { label: 'Response looks safe', icon: '✓', badge: 'bg-brand-green', dot: 'bg-brand-green' },
+    'response-mask': { label: 'Response redacted', icon: '✨', badge: 'bg-brand-amber', dot: 'bg-brand-amber' },
+    'response-review': { label: 'Response flagged for review', icon: '!', badge: 'bg-brand-amber', dot: 'bg-brand-amber' },
+    'response-block': { label: 'Response blocked', icon: '✕', badge: 'bg-brand-red', dot: 'bg-brand-red' },
+    'response-error': { label: "Couldn't check response", icon: '!', badge: 'bg-brand-red', dot: 'bg-brand-red' },
 };
+const CHECKING_STATUSES = new Set(['checking', 'checking-response']);
 export default function GuardOverlay() {
     const [status, setStatus] = useState('idle');
     const [result, setResult] = useState();
@@ -24,7 +31,7 @@ export default function GuardOverlay() {
         setResult(event.result);
         setError(event.error);
         setOptimized(false);
-        setExpanded(event.status !== 'idle' && event.status !== 'checking');
+        setExpanded(event.status !== 'idle' && !CHECKING_STATUSES.has(event.status));
 
         // Sensitive data (email, phone, IP, etc.) must never be left for the
         // user to accidentally send unredacted — apply the mask immediately
@@ -61,7 +68,7 @@ export default function GuardOverlay() {
     }
     return (<div className="font-sans">
             <button type="button" onClick={() => setExpanded((v) => !v)} title="ControlPlane AI" className={`fixed right-5 bottom-28 z-[2147483647] grid h-11 w-11 place-items-center rounded-full text-sm font-bold text-white shadow-lg shadow-black/25 transition-transform hover:scale-105 ${meta.badge}`}>
-                <span className={status === 'checking' ? 'animate-pulse' : ''}>{meta.icon}</span>
+                <span className={CHECKING_STATUSES.has(status) ? 'animate-pulse' : ''}>{meta.icon}</span>
             </button>
 
             {expanded && (<div className="fixed right-5 bottom-42 z-[2147483647] w-75 rounded-2xl border border-line bg-card p-4 text-sm text-ink shadow-2xl shadow-black/30">
@@ -74,14 +81,31 @@ export default function GuardOverlay() {
                     </div>
 
                     {status === 'error' && <p className="mb-2 text-muted">{error}</p>}
+                    {status === 'response-error' && <p className="mb-2 text-muted">{error}</p>}
 
                     {status === 'block' && (<ul className="mb-2 list-disc space-y-1 pl-4 text-brand-red">
                             {(result?.reasons ?? ['This message was blocked by your guardrail policy.']).map((reason) => (<li key={reason}>{reason}</li>))}
                         </ul>)}
 
+                    {status === 'response-block' && (<ul className="mb-2 list-disc space-y-1 pl-4 text-brand-red">
+                            {(result?.reasons ?? ['This response was blocked by your guardrail policy.']).map((reason) => (<li key={reason}>{reason}</li>))}
+                        </ul>)}
+
                     {status === 'review' && (<p className="mb-2 text-muted">
                             This message needs a human reviewer's sign-off before it's sent. You'll be notified once
                             it's resolved.
+                        </p>)}
+
+                    {status === 'response-review' && (<p className="mb-2 text-muted">
+                            This response has been flagged and sent for human review.
+                        </p>)}
+
+                    {status === 'response-mask' && (<p className="mb-2 text-muted">
+                            Sensitive information in ChatGPT's response was automatically redacted.
+                        </p>)}
+
+                    {status === 'response-pass' && (<p className="mb-2 text-muted">
+                            This response passed all guardrail checks.
                         </p>)}
 
                     {result && (status === 'pass' || status === 'mask') && (<div className="mb-3 flex gap-2">
