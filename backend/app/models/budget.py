@@ -86,10 +86,19 @@ class Budget(Base, TimestampMixin):
         ForeignKey("budgets.id", ondelete="SET NULL"), 
         nullable=True
     )
-    
+
+    # `remote_side` must live on the many-to-one ("parent") side of a
+    # self-referential relationship, not on the one-to-many ("children")
+    # side — otherwise SQLAlchemy inverts which end is the collection.
+    parent: Mapped["Budget | None"] = relationship(
+        "Budget",
+        remote_side=[id],
+        back_populates="children",
+        lazy="selectin",
+    )
+
     children: Mapped[list["Budget"]] = relationship(
-        "Budget", 
-        backref="parent", 
-        remote_side=[id], 
-        lazy="selectin"
+        "Budget",
+        back_populates="parent",
+        lazy="selectin",
     )

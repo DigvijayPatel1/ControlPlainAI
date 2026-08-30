@@ -21,9 +21,14 @@ async def list_requests(
     db: AsyncSession = Depends(get_db),
     principal: ApiKey = Depends(get_current_principal),
 ):
-    # Any authenticated user can see every request — there is no
-    # per-role visibility restriction.
-    stmt = select(RequestLog).order_by(RequestLog.created_at.desc()).limit(limit)
+    # Scoped to the caller's own principal — an authenticated caller must
+    # never be able to read another principal's request history.
+    stmt = (
+        select(RequestLog)
+        .where(RequestLog.principal_id == principal.principal_id)
+        .order_by(RequestLog.created_at.desc())
+        .limit(limit)
+    )
 
     result = await db.execute(stmt)
     rows = result.scalars().all()
@@ -55,11 +60,14 @@ async def get_request(
     result = await db.execute(
         select(RequestLog)
         .where(RequestLog.id == request_id)
+        .where(RequestLog.principal_id == principal.principal_id)
     )
 
     request = result.scalar_one_or_none()
 
     if request is None:
+        # Same 404 whether the request doesn't exist or belongs to someone
+        # else — never reveal that another principal's request exists.
         raise HTTPException(
             status_code=404,
             detail="Request not found.",
