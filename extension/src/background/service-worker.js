@@ -81,6 +81,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
         return true; // keep the channel open for the async fetch
     }
+    if (message.type === 'GET_REVIEW_STATUS') {
+        getReviewStatus(message.reviewId)
+            .then((data) => sendResponse({ ok: true, data }))
+            .catch((error) => sendResponse({ ok: false, error: error.message }));
+        return true;
+    }
 });
 async function checkInput(prompt, model) {
     const state = await chrome.storage.local.get({ apiKey: '' });
@@ -183,4 +189,19 @@ async function removeMonitoredSite(origin) {
 async function listMonitoredSites() {
     const { [MONITORED_SITES_KEY]: sites = [] } = await chrome.storage.local.get(MONITORED_SITES_KEY);
     return sites;
+}
+
+async function getReviewStatus(reviewId) {
+    const state = await chrome.storage.local.get({ apiKey: '' });
+    const apiKey = state.apiKey?.trim();
+    if (!apiKey) {
+        throw new Error('ControlPlane API key is not configured.');
+    }
+    const response = await fetch(`${API}/guardrails/reviews/${reviewId}`, {
+        headers: { 'X-API-Key': apiKey },
+    });
+    if (!response.ok) {
+        throw new Error(`ControlPlane API ${response.status}: ${await response.text()}`);
+    }
+    return response.json();
 }

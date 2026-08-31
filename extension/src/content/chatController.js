@@ -1,4 +1,4 @@
-import { checkInput, checkOutput } from '../lib/api';
+import { checkInput, checkOutput, getReviewStatus } from '../lib/api';
 import { getState, onStateChanged } from '../lib/storage';
 import { guardBus } from './guardBus.js';
 import { getProvider } from './providers.js';
@@ -15,6 +15,15 @@ let currentModel = 'auto';
 let lastSentPrompt = '';
 
 const pendingResponseTimers = new WeakMap();
+
+// Tracks assistant-message nodes ControlPlane is currently rewriting (mask/
+// review/block correction) so the MutationObserver below doesn't mistake our
+// own DOM write for a fresh streamed response and re-trigger a check on it.
+const correctingResponseNodes = new WeakSet();
+
+// Tracks nodes with an in-flight output-guardrail request, so overlapping
+// mutation events for the same node don't fire duplicate checks.
+const checkingResponseNodes = new WeakSet();
 
 function getPromptElement() {
     return document.querySelector(provider.promptSelector);
@@ -337,6 +346,10 @@ async function evaluateAssistantMessage(node) {
             );
         }
 
+        if (result.verdict === 'review' && result.review_id) {
+            await waitForReviewResolution(node, result.review_id, content);
+        }
+
         node.style.visibility = '';
 
     }
@@ -402,7 +415,14 @@ function installResponseObserver() {
     const observer = new MutationObserver((mutations) => {
         for (const mutation of mutations) {
             mutation.addedNodes.forEach((added) => {
-                collectAssistantNodes(added).forEach(scheduleResponseCheck);
+                collectAssistantNodes(added).forEach((node) => {
+                    // Skip nodes we are actively rewriting ourselves —
+                    // otherwise applyResponseCorrection's own DOM write
+                    // would re-trigger a check in an endless loop.
+                    if (correctingResponseNodes.has(node))
+                        return;
+                    scheduleResponseCheck(node);
+                });
             });
             // Most of these chat UIs stream by mutating text inside the
             // existing message node rather than adding new ones — catch
@@ -411,11 +431,12 @@ function installResponseObserver() {
                 ? mutation.target
                 : mutation.target.parentElement;
             const assistantAncestor = changedElement?.closest?.(provider.assistantMessageSelector);
-            if (assistantAncestor) {
+            if (assistantAncestor && !correctingResponseNodes.has(assistantAncestor)) {
                 assistantAncestor.dataset.controlplaneChecked = 'false';
                 scheduleResponseCheck(assistantAncestor);
             }
-        );
+        }
+    });
 
     observer.observe(
         document.body,
@@ -463,3 +484,15 @@ export function installInterceptor() {
     installResponseObserver();
 }
 
+async function waitForReviewResolution(node, reviewId, originalContent) {
+    for (let attempt = 0; attempt < 60; attempt += 1) {
+        await wait(2000);
+        const review = await getReviewStatus(reviewId);
+        if (review.resolved) {
+            applyResponseCorrection(node, review.final_response || originalContent);
+            node.style.visibility = '';
+            guardBus.emit({ status: 'response-pass' });
+            return;
+        }
+    }
+}

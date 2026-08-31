@@ -14,7 +14,7 @@ export default function ReviewsPage() {
             </header>
 
             {error && (<div className="mb-6 rounded-xl border border-brand-amber/30 bg-amber-50 px-4 py-3 text-sm text-brand-amber">
-                    You need reviewer or admin access to see this queue.
+                    Sign in to view and resolve the review queue.
                 </div>)}
 
             <Panel title="Human review queue">

@@ -42,3 +42,19 @@ export function checkOutput(prompt, response, model) {
         });
     });
 }
+
+export function getReviewStatus(reviewId) {
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage({ type: 'GET_REVIEW_STATUS', reviewId }, (result) => {
+            if (chrome.runtime.lastError) {
+                reject(new Error(chrome.runtime.lastError.message));
+                return;
+            }
+            if (!result?.ok) {
+                reject(new Error(result?.error || 'ControlPlane request failed.'));
+                return;
+            }
+            resolve(result.data);
+        });
+    });
+}
