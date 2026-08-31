@@ -10,8 +10,9 @@ from app.guardrails.contracts import PipelineResult
 from app.models.common import ReviewAction
 from app.repositories.review_item_repositories import (
     create_review_item,
+    get_approved_prompt_response,
+    get_approved_response,
     get_by_id,
-    has_approved_prompt,
     list_pending,
     resolve_review,
 )
@@ -47,15 +48,34 @@ class ReviewService:
     async def get_pending(self, *, db: AsyncSession, limit: int = 100):
         return await list_pending(db, limit=max(1, min(limit, 500)))
 
-    async def prompt_was_approved(
+    async def get_approved_prompt_response(
         self,
         *,
         db: AsyncSession,
         prompt: str,
-    ) -> bool:
-        return await has_approved_prompt(
+    ) -> str | None:
+        """Returns the reviewer's actual final_response for this exact
+        prompt if it was already approved before — NOT the raw prompt.
+        A reviewer who edits/redacts before approving expects that edited
+        text to be what's sent, not the original unredacted content."""
+        return await get_approved_prompt_response(
             db,
             prompt=prompt,
+        )
+
+    async def get_approved_response(
+        self,
+        *,
+        db: AsyncSession,
+        response: str,
+    ) -> str | None:
+        """Returns the reviewer's final_response for this exact response
+        text if it was already approved before, so check_output can serve
+        that instead of creating a duplicate review on every re-check
+        (e.g. a page refresh re-scanning the same historical message)."""
+        return await get_approved_response(
+            db,
+            response=response,
         )
 
     async def get_review(self, *, db: AsyncSession, review_id: UUID):

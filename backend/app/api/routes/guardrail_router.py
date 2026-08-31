@@ -47,6 +47,7 @@ class InputGuardrailResponse(BaseModel):
     savings_usd: float
 
     optimized_content: str | None = None
+    review_id: UUID | None = None
 
 
 class OutputGuardrailRequest(BaseModel):
@@ -88,19 +89,23 @@ async def check_input(
         policy=principal.security_policy,
     )
 
-    if (
-        result.verdict is Verdict.REVIEW
-        and await review_service.prompt_was_approved(
+    if result.verdict is Verdict.REVIEW:
+        approved_final = await review_service.get_approved_prompt_response(
             db=db,
             prompt=request.prompt,
         )
-    ):
-        result = replace(
-            result,
-            verdict=Verdict.PASS,
-            content=request.prompt,
-            proposed_content=None,
-        )
+        if approved_final is not None:
+            # Use what the reviewer actually approved/edited — NOT the raw
+            # original prompt. Previously this substituted request.prompt
+            # itself, which meant an approved review sent the unmodified
+            # sensitive content through verbatim, defeating the point of
+            # having it reviewed at all.
+            result = replace(
+                result,
+                verdict=Verdict.PASS,
+                content=approved_final,
+                proposed_content=None,
+            )
 
     log = await audit_service.record_request(
         db=db,
@@ -114,6 +119,7 @@ async def check_input(
         chatbot_category=principal.chatbot_category,
     )
 
+    review_id = None
     if result.verdict is Verdict.REVIEW and result.proposed_content:
         review = await review_service.create_review(
             db=db,
@@ -122,6 +128,7 @@ async def check_input(
             proposed_response=result.proposed_content,
             result=result,
         )
+        review_id = review.id
         await notification_service.notify_review(
             review_id=str(review.id),
             principal_id=principal.principal_id,
@@ -162,6 +169,7 @@ async def check_input(
         estimated_cost_usd=usage.cost_usd,
         savings_usd=usage.savings_usd,
         optimized_content=optimized_content,
+        review_id=review_id,
     )
 
 
@@ -183,6 +191,24 @@ async def check_output(
         requested_model=request.model,
         policy=principal.security_policy,
     )
+
+    if result.verdict is Verdict.REVIEW:
+        approved_final = await review_service.get_approved_response(
+            db=db,
+            response=request.response,
+        )
+        if approved_final is not None:
+            # This exact response was already reviewed and resolved before
+            # (most commonly: the user refreshed the page, which re-renders
+            # every historical message and re-triggers a fresh output check
+            # on each one). Without this, every refresh would create a new
+            # review item for content that's already been approved.
+            result = replace(
+                result,
+                verdict=Verdict.PASS,
+                content=approved_final,
+                proposed_content=None,
+            )
 
     log = await audit_service.record_request(
         db=db,
