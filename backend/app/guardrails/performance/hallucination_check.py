@@ -1,3 +1,4 @@
+
 """Low-cost grounding check for claims in generated responses."""
 
 from __future__ import annotations
@@ -27,47 +28,83 @@ _SIMPLE_CLAIM_PATTERN = re.compile(
 
 def check_hallucination(response: str, context: str | None) -> CheckResult:
     """Classify simple response claims as supported, unverified, or contradicted."""
+
     if not response or not response.strip():
         return CheckResult(
             name="hallucination",
-            metadata={"checked": False, "status": "unverified", "reason": "empty_response"},
+            metadata={
+                "checked": False,
+                "status": "unverified",
+                "reason": "empty_response",
+            },
         )
 
     if not context or not context.strip():
+        # Missing grounding context means this check cannot run.
+        #
+        # It must NOT create a medium-risk finding because the decision
+        # engine treats medium risk as REVIEW. Otherwise every ordinary
+        # response without explicit grounding context would be sent to
+        # human review.
         return CheckResult(
             name="hallucination",
-            risk_score=0.55,
-            reasons=["no_grounding_context"],
-            metadata={"checked": False, "status": "unverified", "reason": "no_context_available"},
+            risk_score=0.0,
+            reasons=[],
+            metadata={
+                "checked": False,
+                "status": "skipped",
+                "reason": "no_context_available",
+            },
         )
 
     context_normalized = _normalize(context)
     claims = _extract_claims(response)
+
     supported_claims: list[str] = []
     unsupported_claims: list[str] = []
     contradicted_claims: list[str] = []
 
     for claim in claims:
         normalized_claim = _normalize(claim)
-        if normalized_claim in context_normalized or _claim_supported(claim, context_normalized):
+
+        if (
+            normalized_claim in context_normalized
+            or _claim_supported(claim, context_normalized)
+        ):
             supported_claims.append(claim)
+
         elif _claim_contradicted(claim, context_normalized):
             contradicted_claims.append(claim)
+
         else:
             unsupported_claims.append(claim)
 
     response_numbers = set(_NUMBER_PATTERN.findall(response))
     context_numbers = set(_NUMBER_PATTERN.findall(context))
-    unsupported_numbers = sorted(response_numbers - context_numbers)
+
+    unsupported_numbers = sorted(
+        response_numbers - context_numbers
+    )
 
     if contradicted_claims:
-        status, risk, reasons = "contradicted", 0.90, ["claims_contradict_context"]
+        status = "contradicted"
+        risk = 0.90
+        reasons = ["claims_contradict_context"]
+
     elif unsupported_claims:
-        status, risk, reasons = "unverified", 0.55, ["claims_not_supported_by_context"]
+        status = "unverified"
+        risk = 0.55
+        reasons = ["claims_not_supported_by_context"]
+
     elif len(unsupported_numbers) >= 2:
-        status, risk, reasons = "unverified", 0.55, ["unsupported_numeric_claims"]
+        status = "unverified"
+        risk = 0.55
+        reasons = ["unsupported_numeric_claims"]
+
     else:
-        status, risk, reasons = "supported", 0.0, []
+        status = "supported"
+        risk = 0.0
+        reasons = []
 
     return CheckResult(
         name="hallucination",
@@ -86,33 +123,51 @@ def check_hallucination(response: str, context: str | None) -> CheckResult:
 
 
 def _extract_claims(text: str) -> list[str]:
-    return [match.group(0).strip() for match in _SIMPLE_CLAIM_PATTERN.finditer(text)]
+    return [
+        match.group(0).strip()
+        for match in _SIMPLE_CLAIM_PATTERN.finditer(text)
+    ]
 
 
 def _claim_supported(claim: str, context: str) -> bool:
     claim_numbers = set(_NUMBER_PATTERN.findall(claim))
     context_numbers = set(_NUMBER_PATTERN.findall(context))
+
     if claim_numbers and not claim_numbers.issubset(context_numbers):
         return False
 
     claim_tokens = _important_tokens(claim)
+
     if not claim_tokens:
         return False
-    matched = sum(token in context for token in claim_tokens)
+
+    matched = sum(
+        token in context
+        for token in claim_tokens
+    )
+
     return matched / len(claim_tokens) >= 0.75
 
 
 def _claim_contradicted(claim: str, context: str) -> bool:
     claim_numbers = set(_NUMBER_PATTERN.findall(claim))
+
     if not claim_numbers:
         return False
 
     context_numbers = set(_NUMBER_PATTERN.findall(context))
+
     claim_tokens = _important_tokens(claim)
     context_tokens = _important_tokens(context)
+
     claim_words = claim_tokens - claim_numbers
     context_words = context_tokens - context_numbers
-    overlap = len(claim_words & context_words) / max(len(claim_words), 1)
+
+    overlap = len(claim_words & context_words) / max(
+        len(claim_words),
+        1,
+    )
+
     return (
         overlap >= 0.75
         and not claim_numbers.issubset(context_numbers)
@@ -121,15 +176,45 @@ def _claim_contradicted(claim: str, context: str) -> bool:
 
 
 def _normalize(text: str) -> str:
-    return " ".join(text.casefold().split())
+    return " ".join(
+        text.casefold().split()
+    )
 
 
 def _important_tokens(text: str) -> set[str]:
     normalized = _normalize(text)
+
     tokens = _NUMBER_PATTERN.findall(normalized)
-    tokens.extend(re.findall(r"\b[a-z]{3,}\b", normalized))
+
+    tokens.extend(
+        re.findall(
+            r"\b[a-z]{3,}\b",
+            normalized,
+        )
+    )
+
     stop_words = {
-        "the", "and", "was", "were", "are", "has", "had", "with", "that",
-        "this", "from", "into", "for", "its", "have", "been",
+        "the",
+        "and",
+        "was",
+        "were",
+        "are",
+        "has",
+        "had",
+        "with",
+        "that",
+        "this",
+        "from",
+        "into",
+        "for",
+        "its",
+        "have",
+        "been",
     }
-    return {token for token in tokens if token not in stop_words}
+
+    return {
+        token
+        for token in tokens
+        if token not in stop_words
+    }
+

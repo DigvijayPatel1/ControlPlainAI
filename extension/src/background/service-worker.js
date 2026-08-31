@@ -1,9 +1,10 @@
 "use strict";
 /// <reference types="chrome" />
 // The web dashboard's URL — where "Open dashboard" and connect-flow point to.
-// Swap to your deployed frontend origin in production.
-const DASHBOARD_URL = 'http://localhost:5173';
-const API = 'http://127.0.0.1:8000';
+// Read from extension/.env (VITE_DASHBOARD_URL / VITE_API_BASE) at build time,
+// with the previous hardcoded defaults kept as a fallback.
+const DASHBOARD_URL = import.meta.env.VITE_DASHBOARD_URL || 'http://localhost:5173';
+const API = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000';
 // ============================================================
 // EXTERNAL MESSAGES — dashboard "Connect extension" button
 // ============================================================
