@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.guardrails.cost.token_tracker import estimate_cost
-from app.guardrails.providers.openai_provider import openai_provider as _provider
+from app.guardrails.providers.openai_provider import (
+    openai_provider as _provider,
+)
 
 
 @dataclass(slots=True)
@@ -22,8 +24,20 @@ class ProviderResponse:
     usage: ProviderUsage
 
 
-async def openai_provider(*, model: str, prompt: str) -> ProviderResponse:
-    result = await _provider.generate(prompt=prompt, model=model)
+async def openai_provider(
+    *,
+    model: str,
+    prompt: str,
+    context: str | None = None,
+) -> ProviderResponse:
+    """Generate an LLM response with optional grounding context."""
+
+    result = await _provider.generate(
+        prompt=prompt,
+        context=context,
+        model=model,
+    )
+
     return ProviderResponse(
         content=result.content,
         usage=ProviderUsage(
@@ -37,3 +51,4 @@ async def openai_provider(*, model: str, prompt: str) -> ProviderResponse:
             ),
         ),
     )
+

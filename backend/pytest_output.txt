@@ -1,0 +1,291 @@
+.....FF.................                                                 [100%]
+================================== FAILURES ===================================
+____________ test_full_journey_jwt_and_api_key_share_one_principal ____________
+
+client = <httpx.AsyncClient object at 0x00000280E97361B0>
+
+    async def test_full_journey_jwt_and_api_key_share_one_principal(client: AsyncClient):
+        """The dashboard (JWT) and the extension (API key) must see the same
+        account, role, and budget ù this is the piece that's easy to break."""
+        register = await client.post(
+            "/auth/register",
+            json={"email": _unique_email(), "full_name": "Katherine Johnson", "password": "password123"},
+        )
+        assert register.status_code == 201
+        body = register.json()
+        jwt_headers = {"Authorization": f"Bearer {body['access_token']}"}
+        api_key = body["api_key"]["raw_key"]
+    
+        me = await client.get("/auth/me", headers=jwt_headers)
+        assert me.status_code == 200
+        assert me.json()["email"] == body["user"]["email"]
+    
+        summary = await client.get("/v1/analytics/summary", headers=jwt_headers)
+        assert summary.status_code == 200, summary.text
+    
+        budget = await client.get("/v1/budget", headers=jwt_headers)
+        assert budget.status_code == 200, budget.text
+        assert budget.json()["configured"] is True
+    
+        guarded = await client.post(
+            "/guardrails/input",
+            headers={"X-API-Key": api_key},
+            json={"prompt": "What's a safe way to store user passwords?", "model": "gpt-4o-mini"},
+        )
+        assert guarded.status_code == 200, guarded.text
+        assert guarded.json()["verdict"] in {"pass", "mask", "review", "block"}
+    
+        reviews_jwt = await client.get("/v1/admin/reviews", headers=jwt_headers)
+        assert reviews_jwt.status_code == 403
+        reviews_key = await client.get("/v1/admin/reviews", headers={"X-API-Key": api_key})
+>       assert reviews_key.status_code == 403
+E       assert 401 == 403
+E        +  where 401 = <Response [401 Unauthorized]>.status_code
+
+tests\test_e2e_full_flow.py:117: AssertionError
+---------------------------- Captured stdout call -----------------------------
+2026-08-31 13:54:04,683 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-31 13:54:04,684 INFO sqlalchemy.engine.Engine SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.email = $1::VARCHAR
+2026-08-31 13:54:04,684 INFO sqlalchemy.engine.Engine [cached since 2.243s ago] ('e2e-15a3a36b7d@example.com',)
+2026-08-31 13:54:05,075 INFO sqlalchemy.engine.Engine INSERT INTO users (id, email, full_name, hashed_password, role, is_active, default_principal_id, created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::user_role, $6::BOOLEAN, $7::VARCHAR, $8::TIMESTAMP WITH TIME ZONE, $9::TIMESTAMP WITH TIME ZONE)
+2026-08-31 13:54:05,075 INFO sqlalchemy.engine.Engine [cached since 2.218s ago] (UUID('44593e57-0703-40d2-b9a1-9b8732f09f70'), 'e2e-15a3a36b7d@example.com', 'Katherine Johnson', '$2b$12$xIM68FzQhcGtjqYcTixKuu25DAgcTrayt7R/buH8sqzD/qp1K4YQC', 'USER', True, 'e2e-15a3a36b7d-32f7254d', datetime.datetime(2026, 8, 31, 8, 24, 5, 75589, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 8, 31, 8, 24, 5, 75589, tzinfo=datetime.timezone.utc))
+2026-08-31 13:54:05,252 INFO sqlalchemy.engine.Engine INSERT INTO api_keys (id, principal_id, principal_type, owner_name, entra_object_id, hashed_secret, security_policy, chatbot_category, active, last_used_at, expires_at, role, created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::principal_type, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR, $7::security_policy, $8::chatbot_category, $9::BOOLEAN, $10::TIMESTAMP WITH TIME ZONE, $11::TIMESTAMP WITH TIME ZONE, $12::user_role, $13::TIMESTAMP WITH TIME ZONE, $14::TIMESTAMP WITH TIME ZONE)
+2026-08-31 13:54:05,252 INFO sqlalchemy.engine.Engine [cached since 2.217s ago] (UUID('d0957007-c871-44e3-9421-42c16b37c87a'), 'e2e-15a3a36b7d-32f7254d', 'API_KEY', 'Katherine Johnson', None, 'pbkdf2_sha256$310000$806a18569eeda42d8e88a901d4af9444$7bd4e0a253d631a238d2f258e9605b5409df35f0bab1b8b719b2e115887a64d1', 'MONITOR', None, True, None, None, 'USER', datetime.datetime(2026, 8, 31, 8, 24, 5, 252806, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 8, 31, 8, 24, 5, 252806, tzinfo=datetime.timezone.utc))
+2026-08-31 13:54:05,255 INFO sqlalchemy.engine.Engine SELECT budgets.id, budgets.principal_id, budgets.principal_type, budgets.monthly_limit_usd, budgets.spent_usd, budgets.period_start, budgets.period_end, budgets.request_count, budgets.blocked_count, budgets.parent_budget_id, budgets.created_at, budgets.updated_at 
+FROM budgets 
+WHERE budgets.principal_id = $1::VARCHAR
+2026-08-31 13:54:05,255 INFO sqlalchemy.engine.Engine [cached since 2.206s ago] ('e2e-15a3a36b7d-32f7254d',)
+2026-08-31 13:54:05,257 INFO sqlalchemy.engine.Engine INSERT INTO budgets (id, principal_id, principal_type, monthly_limit_usd, spent_usd, period_start, period_end, request_count, blocked_count, parent_budget_id, created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::principal_type, $4::FLOAT, $5::FLOAT, $6::TIMESTAMP WITH TIME ZONE, $7::TIMESTAMP WITH TIME ZONE, $8::INTEGER, $9::INTEGER, $10::UUID, $11::TIMESTAMP WITH TIME ZONE, $12::TIMESTAMP WITH TIME ZONE)
+2026-08-31 13:54:05,257 INFO sqlalchemy.engine.Engine [cached since 2.203s ago] (UUID('596ba708-15ca-4074-bd00-2fa7ef2b6980'), 'e2e-15a3a36b7d-32f7254d', 'API_KEY', 25.0, 0.0, datetime.datetime(2026, 8, 31, 8, 24, 5, 257256, tzinfo=datetime.timezone.utc), None, 0, 0, None, datetime.datetime(2026, 8, 31, 8, 24, 5, 257256, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 8, 31, 8, 24, 5, 257256, tzinfo=datetime.timezone.utc))
+2026-08-31 13:54:05,259 INFO sqlalchemy.engine.Engine COMMIT
+2026-08-31 13:54:05,263 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-31 13:54:05,263 INFO sqlalchemy.engine.Engine SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = $1::UUID
+2026-08-31 13:54:05,263 INFO sqlalchemy.engine.Engine [cached since 2.2s ago] (UUID('44593e57-0703-40d2-b9a1-9b8732f09f70'),)
+2026-08-31 13:54:05,265 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-08-31 13:54:05,271 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-31 13:54:05,272 INFO sqlalchemy.engine.Engine SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = $1::UUID
+2026-08-31 13:54:05,272 INFO sqlalchemy.engine.Engine [generated in 0.00019s] (UUID('44593e57-0703-40d2-b9a1-9b8732f09f70'),)
+2026-08-31 13:54:05,274 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-08-31 13:54:05,280 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-31 13:54:05,280 INFO sqlalchemy.engine.Engine SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = $1::UUID
+2026-08-31 13:54:05,280 INFO sqlalchemy.engine.Engine [cached since 0.008678s ago] (UUID('44593e57-0703-40d2-b9a1-9b8732f09f70'),)
+2026-08-31 13:54:05,289 INFO sqlalchemy.engine.Engine SELECT count(request_logs.id) AS total, coalesce(avg(request_logs.latency_ms), $1::FLOAT) AS latency, coalesce(sum(request_logs.cost_usd), $2::FLOAT) AS cost, coalesce(sum(request_logs.savings_usd), $3::FLOAT) AS savings, coalesce(sum(request_logs.tokens_saved), $4::INTEGER) AS tokens, coalesce(sum(CASE WHEN (request_logs.verdict = $5::verdict) THEN $6::INTEGER ELSE $7::INTEGER END), $8::INTEGER) AS blocked, coalesce(sum(CASE WHEN (request_logs.verdict = $9::verdict) THEN $10::INTEGER ELSE $11::INTEGER END), $12::INTEGER) AS reviews, coalesce(sum(CASE WHEN (request_logs.cache_hit IS true) THEN $13::INTEGER ELSE $14::INTEGER END), $15::INTEGER) AS hits 
+FROM request_logs 
+WHERE request_logs.principal_id = $16::VARCHAR
+2026-08-31 13:54:05,289 INFO sqlalchemy.engine.Engine [generated in 0.00030s] (0.0, 0.0, 0.0, 0, 'BLOCK', 1, 0, 0, 'REVIEW', 1, 0, 0, 1, 0, 0, 'e2e-15a3a36b7d-32f7254d')
+2026-08-31 13:54:05,302 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-08-31 13:54:05,307 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-31 13:54:05,307 INFO sqlalchemy.engine.Engine SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = $1::UUID
+2026-08-31 13:54:05,307 INFO sqlalchemy.engine.Engine [cached since 0.03607s ago] (UUID('44593e57-0703-40d2-b9a1-9b8732f09f70'),)
+2026-08-31 13:54:05,310 INFO sqlalchemy.engine.Engine SELECT budgets.id, budgets.principal_id, budgets.principal_type, budgets.monthly_limit_usd, budgets.spent_usd, budgets.period_start, budgets.period_end, budgets.request_count, budgets.blocked_count, budgets.parent_budget_id, budgets.created_at, budgets.updated_at 
+FROM budgets 
+WHERE budgets.principal_id = $1::VARCHAR
+2026-08-31 13:54:05,310 INFO sqlalchemy.engine.Engine [cached since 2.261s ago] ('e2e-15a3a36b7d-32f7254d',)
+2026-08-31 13:54:05,312 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-08-31 13:54:05,318 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-31 13:54:05,319 INFO sqlalchemy.engine.Engine SELECT api_keys.id, api_keys.principal_id, api_keys.principal_type, api_keys.owner_name, api_keys.entra_object_id, api_keys.hashed_secret, api_keys.security_policy, api_keys.chatbot_category, api_keys.active, api_keys.last_used_at, api_keys.expires_at, api_keys.role, api_keys.created_at, api_keys.updated_at 
+FROM api_keys 
+WHERE api_keys.principal_id = $1::VARCHAR
+2026-08-31 13:54:05,319 INFO sqlalchemy.engine.Engine [generated in 0.00021s] ('e2e-15a3a36b7d-32f7254d',)
+2026-08-31 13:54:05,496 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-08-31 13:54:05,504 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-31 13:54:05,504 INFO sqlalchemy.engine.Engine SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = $1::UUID
+2026-08-31 13:54:05,504 INFO sqlalchemy.engine.Engine [cached since 0.2321s ago] (UUID('44593e57-0703-40d2-b9a1-9b8732f09f70'),)
+2026-08-31 13:54:05,506 INFO sqlalchemy.engine.Engine ROLLBACK
+------------------------------ Captured log call ------------------------------
+INFO     sqlalchemy.engine.Engine:base.py:2712 BEGIN (implicit)
+INFO     sqlalchemy.engine.Engine:base.py:1848 SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.email = $1::VARCHAR
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 2.243s ago] ('e2e-15a3a36b7d@example.com',)
+INFO     sqlalchemy.engine.Engine:base.py:1848 INSERT INTO users (id, email, full_name, hashed_password, role, is_active, default_principal_id, created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::user_role, $6::BOOLEAN, $7::VARCHAR, $8::TIMESTAMP WITH TIME ZONE, $9::TIMESTAMP WITH TIME ZONE)
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 2.218s ago] (UUID('44593e57-0703-40d2-b9a1-9b8732f09f70'), 'e2e-15a3a36b7d@example.com', 'Katherine Johnson', '$2b$12$xIM68FzQhcGtjqYcTixKuu25DAgcTrayt7R/buH8sqzD/qp1K4YQC', 'USER', True, 'e2e-15a3a36b7d-32f7254d', datetime.datetime(2026, 8, 31, 8, 24, 5, 75589, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 8, 31, 8, 24, 5, 75589, tzinfo=datetime.timezone.utc))
+INFO     sqlalchemy.engine.Engine:base.py:1848 INSERT INTO api_keys (id, principal_id, principal_type, owner_name, entra_object_id, hashed_secret, security_policy, chatbot_category, active, last_used_at, expires_at, role, created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::principal_type, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR, $7::security_policy, $8::chatbot_category, $9::BOOLEAN, $10::TIMESTAMP WITH TIME ZONE, $11::TIMESTAMP WITH TIME ZONE, $12::user_role, $13::TIMESTAMP WITH TIME ZONE, $14::TIMESTAMP WITH TIME ZONE)
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 2.217s ago] (UUID('d0957007-c871-44e3-9421-42c16b37c87a'), 'e2e-15a3a36b7d-32f7254d', 'API_KEY', 'Katherine Johnson', None, 'pbkdf2_sha256$310000$806a18569eeda42d8e88a901d4af9444$7bd4e0a253d631a238d2f258e9605b5409df35f0bab1b8b719b2e115887a64d1', 'MONITOR', None, True, None, None, 'USER', datetime.datetime(2026, 8, 31, 8, 24, 5, 252806, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 8, 31, 8, 24, 5, 252806, tzinfo=datetime.timezone.utc))
+INFO     sqlalchemy.engine.Engine:base.py:1848 SELECT budgets.id, budgets.principal_id, budgets.principal_type, budgets.monthly_limit_usd, budgets.spent_usd, budgets.period_start, budgets.period_end, budgets.request_count, budgets.blocked_count, budgets.parent_budget_id, budgets.created_at, budgets.updated_at 
+FROM budgets 
+WHERE budgets.principal_id = $1::VARCHAR
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 2.206s ago] ('e2e-15a3a36b7d-32f7254d',)
+INFO     sqlalchemy.engine.Engine:base.py:1848 INSERT INTO budgets (id, principal_id, principal_type, monthly_limit_usd, spent_usd, period_start, period_end, request_count, blocked_count, parent_budget_id, created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::principal_type, $4::FLOAT, $5::FLOAT, $6::TIMESTAMP WITH TIME ZONE, $7::TIMESTAMP WITH TIME ZONE, $8::INTEGER, $9::INTEGER, $10::UUID, $11::TIMESTAMP WITH TIME ZONE, $12::TIMESTAMP WITH TIME ZONE)
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 2.203s ago] (UUID('596ba708-15ca-4074-bd00-2fa7ef2b6980'), 'e2e-15a3a36b7d-32f7254d', 'API_KEY', 25.0, 0.0, datetime.datetime(2026, 8, 31, 8, 24, 5, 257256, tzinfo=datetime.timezone.utc), None, 0, 0, None, datetime.datetime(2026, 8, 31, 8, 24, 5, 257256, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 8, 31, 8, 24, 5, 257256, tzinfo=datetime.timezone.utc))
+INFO     sqlalchemy.engine.Engine:base.py:2718 COMMIT
+INFO     sqlalchemy.engine.Engine:base.py:2712 BEGIN (implicit)
+INFO     sqlalchemy.engine.Engine:base.py:1848 SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = $1::UUID
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 2.2s ago] (UUID('44593e57-0703-40d2-b9a1-9b8732f09f70'),)
+INFO     sqlalchemy.engine.Engine:base.py:2715 ROLLBACK
+INFO     sqlalchemy.engine.Engine:base.py:2712 BEGIN (implicit)
+INFO     sqlalchemy.engine.Engine:base.py:1848 SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = $1::UUID
+INFO     sqlalchemy.engine.Engine:base.py:1848 [generated in 0.00019s] (UUID('44593e57-0703-40d2-b9a1-9b8732f09f70'),)
+INFO     sqlalchemy.engine.Engine:base.py:2715 ROLLBACK
+INFO     sqlalchemy.engine.Engine:base.py:2712 BEGIN (implicit)
+INFO     sqlalchemy.engine.Engine:base.py:1848 SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = $1::UUID
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 0.008678s ago] (UUID('44593e57-0703-40d2-b9a1-9b8732f09f70'),)
+INFO     sqlalchemy.engine.Engine:base.py:1848 SELECT count(request_logs.id) AS total, coalesce(avg(request_logs.latency_ms), $1::FLOAT) AS latency, coalesce(sum(request_logs.cost_usd), $2::FLOAT) AS cost, coalesce(sum(request_logs.savings_usd), $3::FLOAT) AS savings, coalesce(sum(request_logs.tokens_saved), $4::INTEGER) AS tokens, coalesce(sum(CASE WHEN (request_logs.verdict = $5::verdict) THEN $6::INTEGER ELSE $7::INTEGER END), $8::INTEGER) AS blocked, coalesce(sum(CASE WHEN (request_logs.verdict = $9::verdict) THEN $10::INTEGER ELSE $11::INTEGER END), $12::INTEGER) AS reviews, coalesce(sum(CASE WHEN (request_logs.cache_hit IS true) THEN $13::INTEGER ELSE $14::INTEGER END), $15::INTEGER) AS hits 
+FROM request_logs 
+WHERE request_logs.principal_id = $16::VARCHAR
+INFO     sqlalchemy.engine.Engine:base.py:1848 [generated in 0.00030s] (0.0, 0.0, 0.0, 0, 'BLOCK', 1, 0, 0, 'REVIEW', 1, 0, 0, 1, 0, 0, 'e2e-15a3a36b7d-32f7254d')
+INFO     sqlalchemy.engine.Engine:base.py:2715 ROLLBACK
+INFO     sqlalchemy.engine.Engine:base.py:2712 BEGIN (implicit)
+INFO     sqlalchemy.engine.Engine:base.py:1848 SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = $1::UUID
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 0.03607s ago] (UUID('44593e57-0703-40d2-b9a1-9b8732f09f70'),)
+INFO     sqlalchemy.engine.Engine:base.py:1848 SELECT budgets.id, budgets.principal_id, budgets.principal_type, budgets.monthly_limit_usd, budgets.spent_usd, budgets.period_start, budgets.period_end, budgets.request_count, budgets.blocked_count, budgets.parent_budget_id, budgets.created_at, budgets.updated_at 
+FROM budgets 
+WHERE budgets.principal_id = $1::VARCHAR
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 2.261s ago] ('e2e-15a3a36b7d-32f7254d',)
+INFO     sqlalchemy.engine.Engine:base.py:2715 ROLLBACK
+INFO     sqlalchemy.engine.Engine:base.py:2712 BEGIN (implicit)
+INFO     sqlalchemy.engine.Engine:base.py:1848 SELECT api_keys.id, api_keys.principal_id, api_keys.principal_type, api_keys.owner_name, api_keys.entra_object_id, api_keys.hashed_secret, api_keys.security_policy, api_keys.chatbot_category, api_keys.active, api_keys.last_used_at, api_keys.expires_at, api_keys.role, api_keys.created_at, api_keys.updated_at 
+FROM api_keys 
+WHERE api_keys.principal_id = $1::VARCHAR
+INFO     sqlalchemy.engine.Engine:base.py:1848 [generated in 0.00021s] ('e2e-15a3a36b7d-32f7254d',)
+INFO     sqlalchemy.engine.Engine:base.py:2715 ROLLBACK
+INFO     sqlalchemy.engine.Engine:base.py:2712 BEGIN (implicit)
+INFO     sqlalchemy.engine.Engine:base.py:1848 SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = $1::UUID
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 0.2321s ago] (UUID('44593e57-0703-40d2-b9a1-9b8732f09f70'),)
+INFO     sqlalchemy.engine.Engine:base.py:2715 ROLLBACK
+________________ test_api_key_rotation_invalidates_the_old_key ________________
+
+client = <httpx.AsyncClient object at 0x00000280E97E68D0>
+
+    async def test_api_key_rotation_invalidates_the_old_key(client: AsyncClient):
+        register = await client.post(
+            "/auth/register",
+            json={"email": _unique_email(), "full_name": "Radia Perlman", "password": "password123"},
+        )
+        body = register.json()
+        jwt_headers = {"Authorization": f"Bearer {body['access_token']}"}
+        old_key = body["api_key"]["raw_key"]
+    
+        rotate = await client.post("/auth/api-key/rotate", headers=jwt_headers)
+        assert rotate.status_code == 200, rotate.text
+        new_key = rotate.json()["api_key"]["raw_key"]
+        assert new_key != old_key
+    
+        old_check = await client.get("/v1/budget", headers={"X-API-Key": old_key})
+>       assert old_check.status_code == 403
+E       assert 401 == 403
+E        +  where 401 = <Response [401 Unauthorized]>.status_code
+
+tests\test_e2e_full_flow.py:135: AssertionError
+---------------------------- Captured stdout call -----------------------------
+2026-08-31 13:54:05,727 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-31 13:54:05,728 INFO sqlalchemy.engine.Engine SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.email = $1::VARCHAR
+2026-08-31 13:54:05,728 INFO sqlalchemy.engine.Engine [cached since 3.287s ago] ('e2e-0de53adfa4@example.com',)
+2026-08-31 13:54:06,133 INFO sqlalchemy.engine.Engine INSERT INTO users (id, email, full_name, hashed_password, role, is_active, default_principal_id, created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::user_role, $6::BOOLEAN, $7::VARCHAR, $8::TIMESTAMP WITH TIME ZONE, $9::TIMESTAMP WITH TIME ZONE)
+2026-08-31 13:54:06,133 INFO sqlalchemy.engine.Engine [cached since 3.276s ago] (UUID('d97e728a-4779-4b0d-91a2-380e6298e3fa'), 'e2e-0de53adfa4@example.com', 'Radia Perlman', '$2b$12$8rxpu4FSi09iuuv5V7MP6eUdpPb/EUnhT/f.ckM5M4uukRvto1HLm', 'USER', True, 'e2e-0de53adfa4-4579dd5c', datetime.datetime(2026, 8, 31, 8, 24, 6, 133304, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 8, 31, 8, 24, 6, 133304, tzinfo=datetime.timezone.utc))
+2026-08-31 13:54:06,307 INFO sqlalchemy.engine.Engine INSERT INTO api_keys (id, principal_id, principal_type, owner_name, entra_object_id, hashed_secret, security_policy, chatbot_category, active, last_used_at, expires_at, role, created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::principal_type, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR, $7::security_policy, $8::chatbot_category, $9::BOOLEAN, $10::TIMESTAMP WITH TIME ZONE, $11::TIMESTAMP WITH TIME ZONE, $12::user_role, $13::TIMESTAMP WITH TIME ZONE, $14::TIMESTAMP WITH TIME ZONE)
+2026-08-31 13:54:06,307 INFO sqlalchemy.engine.Engine [cached since 3.272s ago] (UUID('87d436b4-2f42-49dd-bf1e-3d34e9a3dc6f'), 'e2e-0de53adfa4-4579dd5c', 'API_KEY', 'Radia Perlman', None, 'pbkdf2_sha256$310000$b2c69fc8b9f3b83222f82f80ff399ad8$4d507ffb1ef0e068d429dd259839aad3967dca787965e539ea34babe0de3a25c', 'MONITOR', None, True, None, None, 'USER', datetime.datetime(2026, 8, 31, 8, 24, 6, 307503, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 8, 31, 8, 24, 6, 307503, tzinfo=datetime.timezone.utc))
+2026-08-31 13:54:06,310 INFO sqlalchemy.engine.Engine SELECT budgets.id, budgets.principal_id, budgets.principal_type, budgets.monthly_limit_usd, budgets.spent_usd, budgets.period_start, budgets.period_end, budgets.request_count, budgets.blocked_count, budgets.parent_budget_id, budgets.created_at, budgets.updated_at 
+FROM budgets 
+WHERE budgets.principal_id = $1::VARCHAR
+2026-08-31 13:54:06,310 INFO sqlalchemy.engine.Engine [cached since 3.261s ago] ('e2e-0de53adfa4-4579dd5c',)
+2026-08-31 13:54:06,311 INFO sqlalchemy.engine.Engine INSERT INTO budgets (id, principal_id, principal_type, monthly_limit_usd, spent_usd, period_start, period_end, request_count, blocked_count, parent_budget_id, created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::principal_type, $4::FLOAT, $5::FLOAT, $6::TIMESTAMP WITH TIME ZONE, $7::TIMESTAMP WITH TIME ZONE, $8::INTEGER, $9::INTEGER, $10::UUID, $11::TIMESTAMP WITH TIME ZONE, $12::TIMESTAMP WITH TIME ZONE)
+2026-08-31 13:54:06,311 INFO sqlalchemy.engine.Engine [cached since 3.258s ago] (UUID('d90e5130-eecc-4442-8ad0-38fec52c6efb'), 'e2e-0de53adfa4-4579dd5c', 'API_KEY', 25.0, 0.0, datetime.datetime(2026, 8, 31, 8, 24, 6, 311883, tzinfo=datetime.timezone.utc), None, 0, 0, None, datetime.datetime(2026, 8, 31, 8, 24, 6, 311883, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 8, 31, 8, 24, 6, 311883, tzinfo=datetime.timezone.utc))
+2026-08-31 13:54:06,313 INFO sqlalchemy.engine.Engine COMMIT
+2026-08-31 13:54:06,318 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-31 13:54:06,318 INFO sqlalchemy.engine.Engine SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = $1::UUID
+2026-08-31 13:54:06,318 INFO sqlalchemy.engine.Engine [cached since 3.255s ago] (UUID('d97e728a-4779-4b0d-91a2-380e6298e3fa'),)
+2026-08-31 13:54:06,321 INFO sqlalchemy.engine.Engine ROLLBACK
+2026-08-31 13:54:06,326 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-08-31 13:54:06,327 INFO sqlalchemy.engine.Engine SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = $1::UUID
+2026-08-31 13:54:06,327 INFO sqlalchemy.engine.Engine [cached since 1.055s ago] (UUID('d97e728a-4779-4b0d-91a2-380e6298e3fa'),)
+2026-08-31 13:54:06,329 INFO sqlalchemy.engine.Engine SELECT api_keys.id, api_keys.principal_id, api_keys.principal_type, api_keys.owner_name, api_keys.entra_object_id, api_keys.hashed_secret, api_keys.security_policy, api_keys.chatbot_category, api_keys.active, api_keys.last_used_at, api_keys.expires_at, api_keys.role, api_keys.created_at, api_keys.updated_at 
+FROM api_keys 
+WHERE api_keys.principal_id = $1::VARCHAR
+2026-08-31 13:54:06,329 INFO sqlalchemy.engine.Engine [cached since 1.011s ago] ('e2e-0de53adfa4-4579dd5c',)
+2026-08-31 13:54:06,508 INFO sqlalchemy.engine.Engine UPDATE api_keys SET active=$1::BOOLEAN, updated_at=$2::TIMESTAMP WITH TIME ZONE WHERE api_keys.id = $3::UUID
+2026-08-31 13:54:06,508 INFO sqlalchemy.engine.Engine [generated in 0.00037s] (False, datetime.datetime(2026, 8, 31, 8, 24, 6, 508047, tzinfo=datetime.timezone.utc), UUID('87d436b4-2f42-49dd-bf1e-3d34e9a3dc6f'))
+2026-08-31 13:54:06,511 INFO sqlalchemy.engine.Engine INSERT INTO api_keys (id, principal_id, principal_type, owner_name, entra_object_id, hashed_secret, security_policy, chatbot_category, active, last_used_at, expires_at, role, created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::principal_type, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR, $7::security_policy, $8::chatbot_category, $9::BOOLEAN, $10::TIMESTAMP WITH TIME ZONE, $11::TIMESTAMP WITH TIME ZONE, $12::user_role, $13::TIMESTAMP WITH TIME ZONE, $14::TIMESTAMP WITH TIME ZONE)
+2026-08-31 13:54:06,511 INFO sqlalchemy.engine.Engine [cached since 3.475s ago] (UUID('6610105f-934e-4e99-866f-a1679aa687a6'), 'e2e-0de53adfa4-b6196481', 'API_KEY', 'Radia Perlman', None, 'pbkdf2_sha256$310000$553b9eb1d4aee9504b7cb3df28d8c5c4$029b6d392823e4de2a75b1833cd81e26575745de0a1c0b7c9279c2a3482d83b9', 'MONITOR', None, True, None, None, 'USER', datetime.datetime(2026, 8, 31, 8, 24, 6, 510947, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 8, 31, 8, 24, 6, 510947, tzinfo=datetime.timezone.utc))
+2026-08-31 13:54:06,513 INFO sqlalchemy.engine.Engine SELECT budgets.id, budgets.principal_id, budgets.principal_type, budgets.monthly_limit_usd, budgets.spent_usd, budgets.period_start, budgets.period_end, budgets.request_count, budgets.blocked_count, budgets.parent_budget_id, budgets.created_at, budgets.updated_at 
+FROM budgets 
+WHERE budgets.principal_id = $1::VARCHAR
+2026-08-31 13:54:06,513 INFO sqlalchemy.engine.Engine [cached since 3.465s ago] ('e2e-0de53adfa4-b6196481',)
+2026-08-31 13:54:06,515 INFO sqlalchemy.engine.Engine INSERT INTO budgets (id, principal_id, principal_type, monthly_limit_usd, spent_usd, period_start, period_end, request_count, blocked_count, parent_budget_id, created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::principal_type, $4::FLOAT, $5::FLOAT, $6::TIMESTAMP WITH TIME ZONE, $7::TIMESTAMP WITH TIME ZONE, $8::INTEGER, $9::INTEGER, $10::UUID, $11::TIMESTAMP WITH TIME ZONE, $12::TIMESTAMP WITH TIME ZONE)
+2026-08-31 13:54:06,515 INFO sqlalchemy.engine.Engine [cached since 3.462s ago] (UUID('f9d27115-4809-4752-94f0-b5961449cfc9'), 'e2e-0de53adfa4-b6196481', 'API_KEY', 25.0, 0.0, datetime.datetime(2026, 8, 31, 8, 24, 6, 515815, tzinfo=datetime.timezone.utc), None, 0, 0, None, datetime.datetime(2026, 8, 31, 8, 24, 6, 515815, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 8, 31, 8, 24, 6, 515815, tzinfo=datetime.timezone.utc))
+2026-08-31 13:54:06,518 INFO sqlalchemy.engine.Engine UPDATE users SET default_principal_id=$1::VARCHAR, updated_at=$2::TIMESTAMP WITH TIME ZONE WHERE users.id = $3::UUID
+2026-08-31 13:54:06,518 INFO sqlalchemy.engine.Engine [generated in 0.00029s] ('e2e-0de53adfa4-b6196481', datetime.datetime(2026, 8, 31, 8, 24, 6, 518925, tzinfo=datetime.timezone.utc), UUID('d97e728a-4779-4b0d-91a2-380e6298e3fa'))
+2026-08-31 13:54:06,522 INFO sqlalchemy.engine.Engine COMMIT
+------------------------------ Captured log call ------------------------------
+INFO     sqlalchemy.engine.Engine:base.py:2712 BEGIN (implicit)
+INFO     sqlalchemy.engine.Engine:base.py:1848 SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.email = $1::VARCHAR
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 3.287s ago] ('e2e-0de53adfa4@example.com',)
+INFO     sqlalchemy.engine.Engine:base.py:1848 INSERT INTO users (id, email, full_name, hashed_password, role, is_active, default_principal_id, created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::user_role, $6::BOOLEAN, $7::VARCHAR, $8::TIMESTAMP WITH TIME ZONE, $9::TIMESTAMP WITH TIME ZONE)
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 3.276s ago] (UUID('d97e728a-4779-4b0d-91a2-380e6298e3fa'), 'e2e-0de53adfa4@example.com', 'Radia Perlman', '$2b$12$8rxpu4FSi09iuuv5V7MP6eUdpPb/EUnhT/f.ckM5M4uukRvto1HLm', 'USER', True, 'e2e-0de53adfa4-4579dd5c', datetime.datetime(2026, 8, 31, 8, 24, 6, 133304, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 8, 31, 8, 24, 6, 133304, tzinfo=datetime.timezone.utc))
+INFO     sqlalchemy.engine.Engine:base.py:1848 INSERT INTO api_keys (id, principal_id, principal_type, owner_name, entra_object_id, hashed_secret, security_policy, chatbot_category, active, last_used_at, expires_at, role, created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::principal_type, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR, $7::security_policy, $8::chatbot_category, $9::BOOLEAN, $10::TIMESTAMP WITH TIME ZONE, $11::TIMESTAMP WITH TIME ZONE, $12::user_role, $13::TIMESTAMP WITH TIME ZONE, $14::TIMESTAMP WITH TIME ZONE)
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 3.272s ago] (UUID('87d436b4-2f42-49dd-bf1e-3d34e9a3dc6f'), 'e2e-0de53adfa4-4579dd5c', 'API_KEY', 'Radia Perlman', None, 'pbkdf2_sha256$310000$b2c69fc8b9f3b83222f82f80ff399ad8$4d507ffb1ef0e068d429dd259839aad3967dca787965e539ea34babe0de3a25c', 'MONITOR', None, True, None, None, 'USER', datetime.datetime(2026, 8, 31, 8, 24, 6, 307503, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 8, 31, 8, 24, 6, 307503, tzinfo=datetime.timezone.utc))
+INFO     sqlalchemy.engine.Engine:base.py:1848 SELECT budgets.id, budgets.principal_id, budgets.principal_type, budgets.monthly_limit_usd, budgets.spent_usd, budgets.period_start, budgets.period_end, budgets.request_count, budgets.blocked_count, budgets.parent_budget_id, budgets.created_at, budgets.updated_at 
+FROM budgets 
+WHERE budgets.principal_id = $1::VARCHAR
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 3.261s ago] ('e2e-0de53adfa4-4579dd5c',)
+INFO     sqlalchemy.engine.Engine:base.py:1848 INSERT INTO budgets (id, principal_id, principal_type, monthly_limit_usd, spent_usd, period_start, period_end, request_count, blocked_count, parent_budget_id, created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::principal_type, $4::FLOAT, $5::FLOAT, $6::TIMESTAMP WITH TIME ZONE, $7::TIMESTAMP WITH TIME ZONE, $8::INTEGER, $9::INTEGER, $10::UUID, $11::TIMESTAMP WITH TIME ZONE, $12::TIMESTAMP WITH TIME ZONE)
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 3.258s ago] (UUID('d90e5130-eecc-4442-8ad0-38fec52c6efb'), 'e2e-0de53adfa4-4579dd5c', 'API_KEY', 25.0, 0.0, datetime.datetime(2026, 8, 31, 8, 24, 6, 311883, tzinfo=datetime.timezone.utc), None, 0, 0, None, datetime.datetime(2026, 8, 31, 8, 24, 6, 311883, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 8, 31, 8, 24, 6, 311883, tzinfo=datetime.timezone.utc))
+INFO     sqlalchemy.engine.Engine:base.py:2718 COMMIT
+INFO     sqlalchemy.engine.Engine:base.py:2712 BEGIN (implicit)
+INFO     sqlalchemy.engine.Engine:base.py:1848 SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = $1::UUID
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 3.255s ago] (UUID('d97e728a-4779-4b0d-91a2-380e6298e3fa'),)
+INFO     sqlalchemy.engine.Engine:base.py:2715 ROLLBACK
+INFO     sqlalchemy.engine.Engine:base.py:2712 BEGIN (implicit)
+INFO     sqlalchemy.engine.Engine:base.py:1848 SELECT users.id, users.email, users.full_name, users.hashed_password, users.role, users.is_active, users.default_principal_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = $1::UUID
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 1.055s ago] (UUID('d97e728a-4779-4b0d-91a2-380e6298e3fa'),)
+INFO     sqlalchemy.engine.Engine:base.py:1848 SELECT api_keys.id, api_keys.principal_id, api_keys.principal_type, api_keys.owner_name, api_keys.entra_object_id, api_keys.hashed_secret, api_keys.security_policy, api_keys.chatbot_category, api_keys.active, api_keys.last_used_at, api_keys.expires_at, api_keys.role, api_keys.created_at, api_keys.updated_at 
+FROM api_keys 
+WHERE api_keys.principal_id = $1::VARCHAR
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 1.011s ago] ('e2e-0de53adfa4-4579dd5c',)
+INFO     sqlalchemy.engine.Engine:base.py:1848 UPDATE api_keys SET active=$1::BOOLEAN, updated_at=$2::TIMESTAMP WITH TIME ZONE WHERE api_keys.id = $3::UUID
+INFO     sqlalchemy.engine.Engine:base.py:1848 [generated in 0.00037s] (False, datetime.datetime(2026, 8, 31, 8, 24, 6, 508047, tzinfo=datetime.timezone.utc), UUID('87d436b4-2f42-49dd-bf1e-3d34e9a3dc6f'))
+INFO     sqlalchemy.engine.Engine:base.py:1848 INSERT INTO api_keys (id, principal_id, principal_type, owner_name, entra_object_id, hashed_secret, security_policy, chatbot_category, active, last_used_at, expires_at, role, created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::principal_type, $4::VARCHAR, $5::VARCHAR, $6::VARCHAR, $7::security_policy, $8::chatbot_category, $9::BOOLEAN, $10::TIMESTAMP WITH TIME ZONE, $11::TIMESTAMP WITH TIME ZONE, $12::user_role, $13::TIMESTAMP WITH TIME ZONE, $14::TIMESTAMP WITH TIME ZONE)
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 3.475s ago] (UUID('6610105f-934e-4e99-866f-a1679aa687a6'), 'e2e-0de53adfa4-b6196481', 'API_KEY', 'Radia Perlman', None, 'pbkdf2_sha256$310000$553b9eb1d4aee9504b7cb3df28d8c5c4$029b6d392823e4de2a75b1833cd81e26575745de0a1c0b7c9279c2a3482d83b9', 'MONITOR', None, True, None, None, 'USER', datetime.datetime(2026, 8, 31, 8, 24, 6, 510947, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 8, 31, 8, 24, 6, 510947, tzinfo=datetime.timezone.utc))
+INFO     sqlalchemy.engine.Engine:base.py:1848 SELECT budgets.id, budgets.principal_id, budgets.principal_type, budgets.monthly_limit_usd, budgets.spent_usd, budgets.period_start, budgets.period_end, budgets.request_count, budgets.blocked_count, budgets.parent_budget_id, budgets.created_at, budgets.updated_at 
+FROM budgets 
+WHERE budgets.principal_id = $1::VARCHAR
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 3.465s ago] ('e2e-0de53adfa4-b6196481',)
+INFO     sqlalchemy.engine.Engine:base.py:1848 INSERT INTO budgets (id, principal_id, principal_type, monthly_limit_usd, spent_usd, period_start, period_end, request_count, blocked_count, parent_budget_id, created_at, updated_at) VALUES ($1::UUID, $2::VARCHAR, $3::principal_type, $4::FLOAT, $5::FLOAT, $6::TIMESTAMP WITH TIME ZONE, $7::TIMESTAMP WITH TIME ZONE, $8::INTEGER, $9::INTEGER, $10::UUID, $11::TIMESTAMP WITH TIME ZONE, $12::TIMESTAMP WITH TIME ZONE)
+INFO     sqlalchemy.engine.Engine:base.py:1848 [cached since 3.462s ago] (UUID('f9d27115-4809-4752-94f0-b5961449cfc9'), 'e2e-0de53adfa4-b6196481', 'API_KEY', 25.0, 0.0, datetime.datetime(2026, 8, 31, 8, 24, 6, 515815, tzinfo=datetime.timezone.utc), None, 0, 0, None, datetime.datetime(2026, 8, 31, 8, 24, 6, 515815, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 8, 31, 8, 24, 6, 515815, tzinfo=datetime.timezone.utc))
+INFO     sqlalchemy.engine.Engine:base.py:1848 UPDATE users SET default_principal_id=$1::VARCHAR, updated_at=$2::TIMESTAMP WITH TIME ZONE WHERE users.id = $3::UUID
+INFO     sqlalchemy.engine.Engine:base.py:1848 [generated in 0.00029s] ('e2e-0de53adfa4-b6196481', datetime.datetime(2026, 8, 31, 8, 24, 6, 518925, tzinfo=datetime.timezone.utc), UUID('d97e728a-4779-4b0d-91a2-380e6298e3fa'))
+INFO     sqlalchemy.engine.Engine:base.py:2718 COMMIT
+============================== warnings summary ===============================
+.venv\Lib\site-packages\pydantic_settings\sources\providers\secrets.py:71
+  C:\Users\rithwikvasa\Desktop\hack\ControlPlainAI\backend\.venv\Lib\site-packages\pydantic_settings\sources\providers\secrets.py:71: UserWarning: directory "\run\secrets" does not exist
+    warnings.warn(f'directory "{path}" does not exist')
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_e2e_full_flow.py::test_full_journey_jwt_and_api_key_share_one_principal
+FAILED tests/test_e2e_full_flow.py::test_api_key_rotation_invalidates_the_old_key
+2 failed, 22 passed, 1 warning in 8.65s

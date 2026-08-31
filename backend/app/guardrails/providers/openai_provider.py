@@ -23,13 +23,23 @@ class OpenAIProvider:
     def _get_client(self):
         if self._client is None:
             api_key = settings.openai_api_key
+
             if not api_key:
-                raise RuntimeError("OPENAI_API_KEY is not configured.")
+                raise RuntimeError(
+                    "OPENAI_API_KEY is not configured."
+                )
+
             try:
                 from openai import AsyncOpenAI
             except ImportError as exc:
-                raise RuntimeError("OpenAI support is not installed.") from exc
-            self._client = AsyncOpenAI(api_key=api_key)
+                raise RuntimeError(
+                    "OpenAI support is not installed."
+                ) from exc
+
+            self._client = AsyncOpenAI(
+                api_key=api_key
+            )
+
         return self._client
 
     async def generate(
@@ -39,21 +49,78 @@ class OpenAIProvider:
         context: str | None = None,
         model: str | None = None,
     ) -> ProviderResponse:
-        selected_model = model or settings.OPENAI_MODEL
+        """Generate a response while preserving grounding context."""
+
+        selected_model = (
+            model
+            or settings.OPENAI_MODEL
+        )
+
         messages: list[dict[str, str]] = []
+
         if context:
-            messages.append({"role": "system", "content": f"Use this grounding context when answering:\n\n{context}"})
-        messages.append({"role": "user", "content": prompt})
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "Use this grounding context when "
+                        "answering. Do not invent facts that "
+                        "contradict it.\n\n"
+                        f"{context}"
+                    ),
+                }
+            )
+
+        messages.append(
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        )
+
         response = await self._get_client().chat.completions.create(
             model=selected_model,
             messages=messages,
+            max_completion_tokens=settings.MAX_COMPLETION_TOKENS,
         )
+
         usage = response.usage
-        prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-        completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
-        total_tokens = int(getattr(usage, "total_tokens", 0) or prompt_tokens + completion_tokens)
+
+        prompt_tokens = int(
+            getattr(
+                usage,
+                "prompt_tokens",
+                0,
+            )
+            or 0
+        )
+
+        completion_tokens = int(
+            getattr(
+                usage,
+                "completion_tokens",
+                0,
+            )
+            or 0
+        )
+
+        total_tokens = int(
+            getattr(
+                usage,
+                "total_tokens",
+                0,
+            )
+            or (
+                prompt_tokens
+                + completion_tokens
+            )
+        )
+
         return ProviderResponse(
-            content=response.choices[0].message.content or "",
+            content=(
+                response.choices[0].message.content
+                or ""
+            ),
             model=selected_model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
@@ -62,3 +129,4 @@ class OpenAIProvider:
 
 
 openai_provider = OpenAIProvider()
+

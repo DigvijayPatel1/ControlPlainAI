@@ -1,17 +1,14 @@
-"""CRUD and query logic for ReviewItem."""
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.common import ReviewAction
 from app.models.review_item import ReviewItem
+from app.models.common import ReviewAction
 
-
-#----------------------------------------------------------
-# ReviewItem repository functions
-#----------------------------------------------------------
 
 async def create_review_item(
     db: AsyncSession,
@@ -22,65 +19,48 @@ async def create_review_item(
     flagged_reason: str,
     risk_score: float,
 ) -> ReviewItem:
-    
     item = ReviewItem(
         request_log_id=request_log_id,
         prompt=prompt,
         proposed_response=proposed_response,
         flagged_reason=flagged_reason,
         risk_score=risk_score,
+        resolved=False,
     )
-    
+
     db.add(item)
-    await db.flush()
+    await db.commit()
     await db.refresh(item)
-    
+
     return item
 
 
-#----------------------------------------------------------
-# ReviewItem repository functions
-#----------------------------------------------------------
-
 async def get_by_id(
-    db: AsyncSession, 
-    review_id: UUID
+    db: AsyncSession,
+    review_id: UUID,
 ) -> ReviewItem | None:
-    
-    stmt = (
-        select(ReviewItem)
-        .where(ReviewItem.id == review_id)
-        .with_for_update()
+    result = await db.execute(
+        select(ReviewItem).where(
+            ReviewItem.id == review_id
+        )
     )
-    result = await db.execute(stmt)
-    
+
     return result.scalar_one_or_none()
 
 
-#----------------------------------------------------------
-# ReviewItem repository functions
-#----------------------------------------------------------
-
 async def list_pending(
-    db: AsyncSession, 
-    *, 
-    limit: int = 50
+    db: AsyncSession,
+    limit: int = 100,
 ) -> list[ReviewItem]:
-    
-    stmt = (
+    result = await db.execute(
         select(ReviewItem)
         .where(ReviewItem.resolved.is_(False))
-        .order_by(ReviewItem.created_at.asc())   # oldest first — first in, first reviewed
+        .order_by(ReviewItem.created_at.asc())
         .limit(limit)
     )
-    result = await db.execute(stmt)
-    
+
     return list(result.scalars().all())
 
-
-#----------------------------------------------------------
-# ReviewItem repository functions
-#----------------------------------------------------------
 
 async def resolve_review(
     db: AsyncSession,
@@ -89,11 +69,16 @@ async def resolve_review(
     action: ReviewAction,
     final_response: str,
     resolved_by: str,
-) -> ReviewItem | None:
-    
-    item = await get_by_id(db, review_id)
+) -> ReviewItem:
+    item = await get_by_id(
+        db,
+        review_id,
+    )
+
     if item is None:
-        return None
+        raise ValueError(
+            f"Review {review_id} not found."
+        )
 
     item.resolved = True
     item.resolved_at = datetime.now(timezone.utc)
@@ -101,7 +86,7 @@ async def resolve_review(
     item.action_taken = action
     item.final_response = final_response
 
-    await db.flush()
+    await db.commit()
     await db.refresh(item)
-    
+
     return item
