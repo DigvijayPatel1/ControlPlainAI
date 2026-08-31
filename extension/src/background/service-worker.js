@@ -1,15 +1,20 @@
 "use strict";
 /// <reference types="chrome" />
 // The web dashboard's URL — where "Open dashboard" and connect-flow point to.
-// Read from extension/.env (VITE_DASHBOARD_URL / VITE_API_BASE) at build time,
-// with the previous hardcoded defaults kept as a fallback.
-const DASHBOARD_URL = import.meta.env.VITE_DASHBOARD_URL || 'http://localhost:5173';
-const API = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000';
+// Swap to your deployed frontend origin in production.
+const DASHBOARD_URL = 'http://localhost:5173';
+const API = 'http://127.0.0.1:8000';
+const MONITORED_SITES_KEY = 'monitoredSites';
+// A stable, discoverable id prefix so registered scripts from a previous
+// session can be found and removed by origin without tracking extra state.
+const DYNAMIC_SCRIPT_ID_PREFIX = 'controlplane-dynamic-';
+
 // ============================================================
-// EXTERNAL MESSAGES — dashboard "Connect extension" button
+// EXTERNAL MESSAGES — dashboard "Connect extension" button and
+// "Add monitored site" flow
 // ============================================================
-// Only origins listed under "externally_connectable" in the manifest configuration.
-// may call this.
+// Only origins listed under "externally_connectable" in the manifest
+// configuration may call this.
 chrome.runtime.onMessageExternal.addListener((message, _sender, sendResponse) => {
     if (message?.type === 'SET_API_KEY') {
         const apiKey = typeof message.apiKey === 'string' ? message.apiKey.trim() : '';
@@ -22,6 +27,24 @@ chrome.runtime.onMessageExternal.addListener((message, _sender, sendResponse) =>
             chrome.storage.local.set({ apiKey, principalId: message.principalId ?? null, enabled: true }, () => sendResponse({ ok: true }));
         });
         return true; // keep the channel open for the async storage callback
+    }
+    if (message?.type === 'ADD_MONITORED_SITE') {
+        addMonitoredSite(message.url)
+            .then((site) => sendResponse({ ok: true, site }))
+            .catch((error) => sendResponse({ ok: false, error: error.message }));
+        return true;
+    }
+    if (message?.type === 'REMOVE_MONITORED_SITE') {
+        removeMonitoredSite(message.origin)
+            .then(() => sendResponse({ ok: true }))
+            .catch((error) => sendResponse({ ok: false, error: error.message }));
+        return true;
+    }
+    if (message?.type === 'LIST_MONITORED_SITES') {
+        listMonitoredSites()
+            .then((sites) => sendResponse({ ok: true, sites }))
+            .catch((error) => sendResponse({ ok: false, error: error.message }));
+        return true;
     }
 });
 // ============================================================
@@ -92,4 +115,72 @@ async function checkOutput(prompt, response, model) {
         throw new Error(`ControlPlane API ${res.status}: ${text}`);
     }
     return await res.json();
+}
+
+// ============================================================
+// DYNAMIC SITE REGISTRATION — lets the dashboard's "paste a URL"
+// flow work for sites not baked into manifest.json at build time.
+//
+// Chrome (Manifest V3) can't append to the static content_scripts
+// list at runtime, so an arbitrary URL is handled differently from
+// the three built-in providers (ChatGPT/Claude/Gemini): we request
+// a one-off host permission for that exact origin, then register a
+// content script for it with chrome.scripting.registerContentScripts.
+// It uses the same content-main.js bundle — providers.js falls back
+// to a generic, unverified selector heuristic for unknown hostnames.
+// ============================================================
+
+function scriptIdFor(origin) {
+    return `${DYNAMIC_SCRIPT_ID_PREFIX}${origin}`;
+}
+
+async function addMonitoredSite(rawUrl) {
+    let url;
+    try {
+        url = new URL(rawUrl);
+    } catch {
+        throw new Error('That doesn\'t look like a valid URL.');
+    }
+    if (url.protocol !== 'https:') {
+        throw new Error('Only https:// URLs are supported.');
+    }
+    const origin = url.origin;
+    const matchPattern = `${origin}/*`;
+
+    const granted = await chrome.permissions.request({ origins: [matchPattern] });
+    if (!granted) {
+        throw new Error('Permission was not granted for that site.');
+    }
+
+    const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [scriptIdFor(origin)] });
+    if (existing.length === 0) {
+        await chrome.scripting.registerContentScripts([
+            {
+                id: scriptIdFor(origin),
+                js: ['content-main.js'],
+                matches: [matchPattern],
+                runAt: 'document_idle',
+            },
+        ]);
+    }
+
+    const site = { origin, hostname: url.hostname, addedAt: Date.now() };
+    const { [MONITORED_SITES_KEY]: sites = [] } = await chrome.storage.local.get(MONITORED_SITES_KEY);
+    const next = [...sites.filter((s) => s.origin !== origin), site];
+    await chrome.storage.local.set({ [MONITORED_SITES_KEY]: next });
+    return site;
+}
+
+async function removeMonitoredSite(origin) {
+    await chrome.scripting.unregisterContentScripts({ ids: [scriptIdFor(origin)] }).catch(() => {
+        // Not registered — nothing to remove, not an error.
+    });
+    await chrome.permissions.remove({ origins: [`${origin}/*`] }).catch(() => {});
+    const { [MONITORED_SITES_KEY]: sites = [] } = await chrome.storage.local.get(MONITORED_SITES_KEY);
+    await chrome.storage.local.set({ [MONITORED_SITES_KEY]: sites.filter((s) => s.origin !== origin) });
+}
+
+async function listMonitoredSites() {
+    const { [MONITORED_SITES_KEY]: sites = [] } = await chrome.storage.local.get(MONITORED_SITES_KEY);
+    return sites;
 }

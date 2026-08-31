@@ -18,6 +18,7 @@ from app.guardrails.safety.bias_detector import check_bias
 from app.guardrails.safety.pii_detector import PIIDetector
 from app.guardrails.safety.pii_redactor import redact_pii
 from app.guardrails.safety.policy_checker import check_policy
+from app.guardrails.safety.sensitivity_checker import check_sensitivity
 from app.guardrails.safety.toxicity_detector import check_toxicity
 from app.guardrails.schemas.pii import PIIResult
 from app.models.common import SecurityPolicy, Verdict
@@ -69,6 +70,7 @@ def _safety_checks(
     return [
         pii_check,
         check_policy(content),
+        check_sensitivity(content),
         check_toxicity(content),
         check_bias(content),
     ], pii_result

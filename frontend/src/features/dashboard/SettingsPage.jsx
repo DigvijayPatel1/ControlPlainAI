@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../../app/hooks';
 import { apiKeyIssued } from '../auth/authSlice';
 import { useRotateApiKeyMutation } from '../auth/authApi';
 import { useBudgetQuery } from './dashboardApi';
 import ApiKeyCard from './ApiKeyCard';
 import { Metric, Panel } from './widgets';
+import { addMonitoredSite, BUILT_IN_PROVIDERS, isExtensionConfigured, listMonitoredSites, removeMonitoredSite } from '../../lib/extension';
 function Field({ label, value, hint }) {
     return (<label className="mb-4 block last:mb-0">
             <span className="mb-1 block text-xs font-medium text-muted">
@@ -21,6 +22,51 @@ export default function SettingsPage() {
     const [rotateApiKey, { isLoading }] = useRotateApiKeyMutation();
     const { data: budget } = useBudgetQuery();
     const [rotateError, setRotateError] = useState('');
+    const [siteUrl, setSiteUrl] = useState('');
+    const [monitoredSites, setMonitoredSites] = useState([]);
+    const [siteError, setSiteError] = useState('');
+    const [addingSite, setAddingSite] = useState(false);
+
+    useEffect(() => {
+        if (isExtensionConfigured()) {
+            listMonitoredSites().then(setMonitoredSites);
+        }
+    }, []);
+
+    async function handleAddSite(url) {
+        setSiteError('');
+        setAddingSite(true);
+        try {
+            const result = await addMonitoredSite(url);
+            if (!result.ok) {
+                setSiteError(
+                    result.reason === 'no-extension-id' || result.reason === 'no-runtime'
+                        ? 'Install and connect the ControlPlane extension first.'
+                        : result.reason ?? 'Could not add that site.'
+                );
+                return;
+            }
+            setSiteUrl('');
+            const sites = await listMonitoredSites();
+            setMonitoredSites(sites);
+        } finally {
+            setAddingSite(false);
+        }
+    }
+
+    async function handleRemoveSite(origin) {
+        await removeMonitoredSite(origin);
+        const sites = await listMonitoredSites();
+        setMonitoredSites(sites);
+    }
+
+    function handleAddCustomUrl(event) {
+        event.preventDefault();
+        if (siteUrl.trim()) {
+            handleAddSite(siteUrl.trim());
+        }
+    }
+
     async function handleRotate() {
         setRotateError('');
         try {
@@ -69,6 +115,63 @@ export default function SettingsPage() {
                 <button type="button" onClick={handleRotate} disabled={isLoading} className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-paper disabled:opacity-50">
                     {isLoading ? 'Generating…' : 'Generate new API key'}
                 </button>
+            </Panel>
+
+            <Panel title="Monitored AI models">
+                <p className="mb-4 text-sm text-muted">
+                    ChatGPT, Claude, and Gemini are guarded automatically once the extension is connected. To guard
+                    another site, paste its URL below — the extension will ask for one-time permission to run on it.
+                </p>
+
+                <div className="mb-4 flex flex-wrap gap-2">
+                    {BUILT_IN_PROVIDERS.map((provider) => {
+                        const active = monitoredSites.some((s) => s.origin === provider.origin)
+                            || true; // built-ins are always covered by the static manifest
+                        return (
+                            <span key={provider.origin} className="inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1 text-xs font-medium text-ink">
+                                <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-brand-green' : 'bg-muted'}`} />
+                                {provider.label}
+                            </span>
+                        );
+                    })}
+                </div>
+
+                <form onSubmit={handleAddCustomUrl} className="mb-3 flex gap-2">
+                    <input
+                        type="url"
+                        value={siteUrl}
+                        onChange={(e) => setSiteUrl(e.target.value)}
+                        placeholder="https://your-custom-chat-tool.com"
+                        className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink"
+                    />
+                    <button type="submit" disabled={addingSite || !siteUrl.trim()} className="rounded-lg bg-sidebar px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-sidebar/90 disabled:opacity-50">
+                        {addingSite ? 'Adding…' : 'Add site'}
+                    </button>
+                </form>
+
+                {siteError && (<div className="mb-3 rounded-lg border border-brand-red/30 bg-red-50 px-3 py-2 text-sm text-brand-red">
+                        {siteError}
+                    </div>)}
+
+                {monitoredSites.filter((s) => !BUILT_IN_PROVIDERS.some((p) => p.origin === s.origin)).length > 0 && (
+                    <ul className="space-y-2">
+                        {monitoredSites
+                            .filter((s) => !BUILT_IN_PROVIDERS.some((p) => p.origin === s.origin))
+                            .map((site) => (
+                                <li key={site.origin} className="flex items-center justify-between rounded-lg border border-line bg-paper px-3 py-2 text-sm">
+                                    <span className="font-mono text-ink">{site.hostname}</span>
+                                    <button type="button" onClick={() => handleRemoveSite(site.origin)} className="text-xs font-medium text-brand-red hover:underline">
+                                        Remove
+                                    </button>
+                                </li>
+                            ))}
+                    </ul>
+                )}
+
+                <p className="mt-3 text-xs text-muted">
+                    Custom sites use a best-effort selector — if the guard overlay doesn't appear, that page's layout
+                    may not be recognized yet.
+                </p>
             </Panel>
         </>);
 }

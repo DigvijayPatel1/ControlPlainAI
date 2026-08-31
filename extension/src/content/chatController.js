@@ -1,28 +1,23 @@
 import { checkInput, checkOutput } from '../lib/api';
 import { getState, onStateChanged } from '../lib/storage';
 import { guardBus } from './guardBus.js';
+import { getProvider } from './providers.js';
 
-const PROMPT_SELECTOR = '#prompt-textarea';
-const SEND_SELECTOR = '#composer-submit-button';
-
-const ASSISTANT_MESSAGE_SELECTOR =
-    '[data-message-author-role="assistant"]';
-
-const RESPONSE_STABLE_MS = 1200;
+const provider = getProvider(window.location.hostname);
 
 let enabled = true;
 let bypassNextSend = false;
-let currentModel = 'gpt-4o-mini';
+// 'auto' lets the backend's model_router pick small-vs-large based on the
+// prompt's actual complexity.
+let currentModel = 'auto';
+// The prompt actually sent (after any masking), so the output check has the
+// right grounding context.
 let lastSentPrompt = '';
 
 const pendingResponseTimers = new WeakMap();
-const checkingResponseNodes = new WeakSet();
-const correctingResponseNodes = new WeakSet();
 
 function getPromptElement() {
-    return document.querySelector(
-        PROMPT_SELECTOR
-    );
+    return document.querySelector(provider.promptSelector);
 }
 
 export function getPrompt() {
@@ -34,6 +29,25 @@ export function getPrompt() {
     );
 }
 
+/**
+ * Replaces the composer's content with `text`.
+ *
+ * IMPORTANT: this returns whether the DOM write itself succeeded — it does
+ * NOT guarantee the host page's own editor state (React/Lexical/ProseMirror,
+ * whichever framework the site uses) actually adopted the change. Rich-text
+ * editors frequently maintain their own internal model and can silently
+ * ignore a raw innerHTML mutation, even with a dispatched `input` event,
+ * because they never received the change through their own input pipeline.
+ * When that happens the box can visually show the new text for a moment
+ * while the editor still submits its OLD internal state on send — which is
+ * exactly the bug that let an unredacted email through.
+ *
+ * Because of that, callers that inject redacted content MUST re-read
+ * getPrompt() afterward and confirm it actually reflects the change before
+ * treating the message as safe to send. See the verification step in
+ * interceptSend() below — that check, not this function, is what actually
+ * prevents unredacted content from going out.
+ */
 export function setPrompt(text) {
     const element = getPromptElement();
 
@@ -41,6 +55,30 @@ export function setPrompt(text) {
         return false;
 
     element.focus();
+
+    // Try execCommand first: unlike a raw innerHTML write, this goes through
+    // the browser's native contenteditable input pipeline (it fires a real
+    // `beforeinput`/`input` pair), which is what most rich-text editor
+    // frameworks actually listen to. It's more likely to be picked up by
+    // the page's own state than a synthetic event dispatched after the fact.
+    try {
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        selection.removeAllRanges();
+        selection.addRange(range);
+        const ok = document.execCommand('insertText', false, text);
+        if (ok)
+            return true;
+    }
+    catch {
+        // execCommand is deprecated and some browsers/pages may reject it —
+        // fall through to the manual DOM-write path below.
+    }
+
+    // Fallback: direct DOM write + synthetic input event. Best-effort only —
+    // see the verification step in interceptSend(), which is the real
+    // safety net regardless of which path was used here.
     element.innerHTML = '';
 
     const paragraph =
@@ -63,9 +101,7 @@ export function setPrompt(text) {
 }
 
 function getSendButton() {
-    return document.querySelector(
-        SEND_SELECTOR
-    );
+    return document.querySelector(provider.sendSelector);
 }
 
 export function sendNow() {
@@ -90,6 +126,15 @@ export function sendNow() {
 
     return true;
 }
+
+function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Verdicts that must NEVER auto-send — the whole point of the guardrail is
+// that these stop and wait for the user (or a reviewer) before anything
+// leaves the browser.
+const BLOCKING_VERDICTS = new Set(['block', 'review']);
 
 async function interceptSend(event) {
     /*
@@ -124,24 +169,55 @@ async function interceptSend(event) {
     });
 
     try {
-        const result = await checkInput(
-            prompt,
-            currentModel
-        );
+        const result = await checkInput(prompt, currentModel);
+        guardBus.emit({ status: result.verdict, result });
 
-        guardBus.emit({
-            status: result.verdict,
-            result,
-        });
+        if (result.verdict === 'pass') {
+            // Clean content, unmodified — behave like a normal chat client
+            // and send it immediately.
+            sendNow();
+            return;
+        }
+
+        if (result.verdict === 'mask' && result.optimized_content) {
+            setPrompt(result.optimized_content);
+            // Give the page's own editor a moment to process the change,
+            // then verify it actually took — do NOT trust the write blindly.
+            await wait(120);
+            const verifiedPrompt = getPrompt();
+            const redactionDidNotStick = verifiedPrompt === prompt || verifiedPrompt !== result.optimized_content;
+
+            if (redactionDidNotStick) {
+                // This is the failure mode that let an unredacted email
+                // through: our write didn't reach the page's real editor
+                // state. Hard stop — never send on unverified content.
+                guardBus.emit({
+                    status: 'error',
+                    error: "Sensitive info was detected, but this page wouldn't let ControlPlane safely replace it in the message box. Nothing was sent — please remove the sensitive info yourself and send again.",
+                });
+                return;
+            }
+            sendNow();
+            return;
+        }
+
+        // 'block' and 'review' fall through here and simply stay stopped —
+        // BLOCKING_VERDICTS exists so this behavior is explicit rather than
+        // "whatever didn't match the cases above."
+        if (!BLOCKING_VERDICTS.has(result.verdict) && result.verdict !== 'mask') {
+            // Defensive: an unrecognized verdict should never silently send.
+            console.warn('ControlPlane: unrecognized verdict, holding message:', result.verdict);
+        } else if (result.verdict === 'mask') {
+            // Backend said 'mask' but didn't return redacted content at all.
+            // Fail closed — hold the message rather than sending the
+            // original unredacted text.
+            guardBus.emit({ status: 'error', error: 'Sensitive content was detected but could not be safely redacted. Message held.' });
+        }
     }
     catch (error) {
-        guardBus.emit({
-            status: 'error',
-            error:
-                error instanceof Error
-                    ? error.message
-                    : String(error),
-        });
+        guardBus.emit({ status: 'error', error: error instanceof Error ? error.message : String(error) });
+        // Fail closed: a check that errors out must NOT fall back to
+        // sending the original, unchecked prompt.
     }
 }
 
@@ -310,99 +386,34 @@ function scheduleResponseCheck(node) {
 
     const timer = setTimeout(() => {
         pendingResponseTimers.delete(node);
-
-        void evaluateAssistantMessage(
-            node
-        );
-    }, RESPONSE_STABLE_MS);
-
-    pendingResponseTimers.set(
-        node,
-        timer
-    );
+        void evaluateAssistantMessage(node);
+    }, provider.responseStableMs);
+    pendingResponseTimers.set(node, timer);
 }
 
 function collectAssistantNodes(root) {
     if (!(root instanceof HTMLElement))
         return [];
-
-    const nodes =
-        root.matches(
-            ASSISTANT_MESSAGE_SELECTOR
-        )
-            ? [root]
-            : [];
-
-    return nodes.concat(
-        Array.from(
-            root.querySelectorAll(
-                ASSISTANT_MESSAGE_SELECTOR
-            )
-        )
-    );
+    const nodes = root.matches(provider.assistantMessageSelector) ? [root] : [];
+    return nodes.concat(Array.from(root.querySelectorAll(provider.assistantMessageSelector)));
 }
 
 function installResponseObserver() {
-    const observer =
-        new MutationObserver(
-            (mutations) => {
-                for (const mutation of mutations) {
-
-                    /*
-                     * Detect newly-added assistant messages.
-                     */
-                    mutation.addedNodes.forEach(
-                        (added) => {
-                            collectAssistantNodes(
-                                added
-                            ).forEach(
-                                scheduleResponseCheck
-                            );
-                        }
-                    );
-
-                    /*
-                     * ChatGPT commonly streams by modifying
-                     * text inside an existing assistant node.
-                     */
-                    const changedElement =
-                        mutation.target instanceof
-                        HTMLElement
-                            ? mutation.target
-                            : mutation.target
-                                  .parentElement;
-
-                    const assistantAncestor =
-                        changedElement?.closest?.(
-                            ASSISTANT_MESSAGE_SELECTOR
-                        );
-
-                    if (!assistantAncestor)
-                        continue;
-
-                    /*
-                     * Ignore DOM changes produced by our own
-                     * response replacement.
-                     */
-                    if (
-                        correctingResponseNodes.has(
-                            assistantAncestor
-                        )
-                    ) {
-                        continue;
-                    }
-
-                    /*
-                     * Mark it dirty and wait for the text to
-                     * become stable before checking.
-                     */
-                    assistantAncestor.dataset.controlplaneChecked =
-                        'false';
-
-                    scheduleResponseCheck(
-                        assistantAncestor
-                    );
-                }
+    const observer = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+            mutation.addedNodes.forEach((added) => {
+                collectAssistantNodes(added).forEach(scheduleResponseCheck);
+            });
+            // Most of these chat UIs stream by mutating text inside the
+            // existing message node rather than adding new ones — catch
+            // that case too.
+            const changedElement = mutation.target instanceof HTMLElement
+                ? mutation.target
+                : mutation.target.parentElement;
+            const assistantAncestor = changedElement?.closest?.(provider.assistantMessageSelector);
+            if (assistantAncestor) {
+                assistantAncestor.dataset.controlplaneChecked = 'false';
+                scheduleResponseCheck(assistantAncestor);
             }
         );
 
@@ -417,65 +428,23 @@ function installResponseObserver() {
 }
 
 export function installInterceptor() {
-    /*
-     * Mouse/click send interception.
-     */
-    document.addEventListener(
-        'click',
-        (event) => {
-            const target =
-                event.target;
-
-            if (
-                !target?.closest?.(
-                    SEND_SELECTOR
-                )
-            ) {
-                return;
-            }
-
-            void interceptSend(event);
-        },
-        true
-    );
-
-    /*
-     * Enter-key send interception.
-     */
-    document.addEventListener(
-        'keydown',
-        (event) => {
-            const keyboardEvent = event;
-
-            if (
-                keyboardEvent.key !== 'Enter'
-                || keyboardEvent.shiftKey
-            ) {
-                return;
-            }
-
-            const target =
-                event.target;
-
-            if (
-                !target?.closest?.(
-                    PROMPT_SELECTOR
-                )
-            ) {
-                return;
-            }
-
-            if (!getPrompt())
-                return;
-
-            void interceptSend(event);
-        },
-        true
-    );
-
-    /*
-     * Load the current extension protection state.
-     */
+    document.addEventListener('click', (event) => {
+        const target = event.target;
+        if (!target.closest(provider.sendSelector))
+            return;
+        void interceptSend(event);
+    }, true);
+    document.addEventListener('keydown', (event) => {
+        const keyboardEvent = event;
+        if (keyboardEvent.key !== 'Enter' || keyboardEvent.shiftKey)
+            return;
+        const target = event.target;
+        if (!target.closest(provider.promptSelector))
+            return;
+        if (!getPrompt())
+            return;
+        void interceptSend(event);
+    }, true);
     getState().then((state) => {
         enabled = state.enabled;
     });

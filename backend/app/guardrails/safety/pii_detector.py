@@ -1,9 +1,60 @@
-"""PII detection only. This module never alters content or selects a verdict."""
+"""PII detection only. This module never alters content or selects a verdict.
+
+Two detection layers:
+  1. Regex recognizers — structured formats (email, phone, SSN, credit card,
+     API keys). Fast, precise, zero setup.
+  2. spaCy NER — free-text entities (PERSON, GPE/LOCATION, ORG) that regex
+     structurally cannot catch. This is what makes pii_policy.py's PERSON
+     and LOCATION mask rules actually fire; previously those rules existed
+     but nothing ever produced those entity types.
+
+If spaCy or its model isn't installed, NER is skipped and a conservative
+capitalized-name heuristic is used instead so detection doesn't silently
+do nothing — see _fallback_person_heuristic. Install spaCy properly with:
+
+    uv add spacy
+    uv run python -m spacy download en_core_web_sm
+"""
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 from app.guardrails.schemas.pii import PIIDetection, PIIResult
+
+try:
+    import spacy  # type: ignore[import-untyped]
+except ImportError:
+    spacy = None  # NER layer degrades to the regex-only heuristic below
+
+
+@lru_cache(maxsize=1)
+def _load_nlp():
+    """Loaded once per process. Returns None if spaCy or the model isn't
+    available — callers must handle that, not crash on it."""
+    if spacy is None:
+        return None
+    try:
+        return spacy.load("en_core_web_sm", disable=["parser", "lemmatizer"])
+    except OSError:
+        # spaCy is installed but the model wasn't downloaded
+        return None
+
+
+_SPACY_LABEL_MAP = {
+    "PERSON": "PERSON",
+    "GPE": "LOCATION",
+    "LOC": "LOCATION",
+    "ORG": "ORG",
+}
+
+# Fallback used only when spaCy/the model isn't available: two-or-more
+# consecutive capitalized words, not at a sentence start. Deliberately
+# conservative (some false negatives) since it's a stopgap, not the primary
+# path — get the real model installed for production use.
+_FALLBACK_PERSON_PATTERN = re.compile(
+    r"(?<!^)(?<![.!?]\s)\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b"
+)
 
 
 class PIIDetector:
@@ -50,8 +101,36 @@ class PIIDetector:
             if score >= self.score_threshold
             for match in pattern.finditer(text)
         ]
+        detections.extend(self._detect_free_text_entities(text))
         detections = self._remove_overlaps(detections)
         return PIIResult(passed=not detections, detections=detections)
+
+    def _detect_free_text_entities(self, text: str) -> list[PIIDetection]:
+        """PERSON/LOCATION/ORG — the layer regex structurally can't do."""
+        nlp = _load_nlp()
+        if nlp is not None:
+            doc = nlp(text)
+            return [
+                PIIDetection(
+                    entity_type=_SPACY_LABEL_MAP[ent.label_],
+                    start=ent.start_char,
+                    end=ent.end_char,
+                    score=0.75,
+                )
+                for ent in doc.ents
+                if ent.label_ in _SPACY_LABEL_MAP
+            ]
+
+        # Fallback heuristic — lower confidence, PERSON only.
+        return [
+            PIIDetection(
+                entity_type="PERSON",
+                start=match.start(1),
+                end=match.end(1),
+                score=0.55,
+            )
+            for match in _FALLBACK_PERSON_PATTERN.finditer(text)
+        ]
 
     @staticmethod
     def _remove_overlaps(detections: list[PIIDetection]) -> list[PIIDetection]:
