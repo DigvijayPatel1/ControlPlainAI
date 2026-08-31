@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.review_item import ReviewItem
 from app.models.common import ReviewAction
+from app.models.request_log import RequestLog
 
 
 async def create_review_item(
@@ -60,6 +61,24 @@ async def list_pending(
     )
 
     return list(result.scalars().all())
+
+
+async def has_approved_prompt(
+    db: AsyncSession,
+    *,
+    prompt: str,
+) -> bool:
+    result = await db.execute(
+        select(ReviewItem.id)
+        .join(RequestLog, ReviewItem.request_log_id == RequestLog.id)
+        .where(
+            ReviewItem.prompt == prompt,
+            ReviewItem.resolved.is_(True),
+        )
+        .limit(1)
+    )
+
+    return result.scalar_one_or_none() is not None
 
 
 async def resolve_review(

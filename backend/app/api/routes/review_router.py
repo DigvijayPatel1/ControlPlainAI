@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_reviewer
+from app.api.deps import get_current_user
 from app.core.database import get_db
 from app.models.review_item import ReviewItem
 from app.models.user import User
@@ -19,7 +19,7 @@ router = APIRouter(
 async def get_reviews(
     limit: int = Query(default=50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_reviewer),
+    user: User = Depends(get_current_user),
 ):
     """Return unresolved review items, oldest first."""
 

@@ -7,10 +7,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_reviewer
+from app.api.deps import get_current_user
 from app.core.database import get_db
-from app.models.api_key import ApiKey
 from app.models.common import ReviewAction
+from app.models.user import User
 from app.schemas.review_item import (
     ReviewDecisionRequest,
     ReviewDecisionResult,
@@ -32,7 +32,7 @@ router = APIRouter(
 async def get_reviews(
     limit: int = Query(default=100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
-    principal: ApiKey = Depends(require_reviewer),
+    user: User = Depends(get_current_user),
 ) -> list[ReviewItem]:
     """Return unresolved review items, oldest first."""
 
@@ -46,7 +46,7 @@ async def get_reviews(
 async def get_review(
     review_id: UUID,
     db: AsyncSession = Depends(get_db),
-    principal: ApiKey = Depends(require_reviewer),
+    user: User = Depends(get_current_user),
 ) -> ReviewItem:
     """Return a single review item."""
 
@@ -70,7 +70,7 @@ async def resolve_review(
     review_id: UUID,
     resolution: ReviewDecisionRequest,
     db: AsyncSession = Depends(get_db),
-    principal: ApiKey = Depends(require_reviewer),
+    user: User = Depends(get_current_user),
 ) -> ReviewDecisionResult:
     """Resolve a pending review item."""
 

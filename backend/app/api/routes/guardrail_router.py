@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+import time
+from dataclasses import replace
+from uuid import UUID
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_principal
+from app.core.database import get_db
 from app.guardrails.pipeline import evaluate_input, evaluate_output
 from app.models.api_key import ApiKey
-from app.models.common import SecurityPolicy
+from app.models.common import SecurityPolicy, Verdict
+from app.services.audit_service import audit_service
+from app.services.notification_service import notification_service
+from app.services.review_service import review_service
 
 
 router = APIRouter(
@@ -41,7 +50,7 @@ class InputGuardrailResponse(BaseModel):
 
 
 class OutputGuardrailRequest(BaseModel):
-    prompt: str = Field(min_length=1)
+    prompt: str = Field(default="")
     response: str = Field(min_length=1)
     model: str = "auto"
 
@@ -53,6 +62,12 @@ class OutputGuardrailResponse(BaseModel):
     risk_score: float
     reasons: list[str]
     corrections_applied: list[str]
+    review_id: UUID | None = None
+
+
+class ReviewStatusResponse(BaseModel):
+    resolved: bool
+    final_response: str | None = None
 
 
 @router.post(
@@ -61,14 +76,60 @@ class OutputGuardrailResponse(BaseModel):
 )
 async def check_input(
     request: InputGuardrailRequest,
+    db: AsyncSession = Depends(get_db),
     principal: ApiKey = Depends(get_current_principal),
 ) -> InputGuardrailResponse:
+
+    started_at = time.perf_counter()
 
     result = await evaluate_input(
         prompt=request.prompt,
         requested_model=request.model,
         policy=principal.security_policy,
     )
+
+    if (
+        result.verdict is Verdict.REVIEW
+        and await review_service.prompt_was_approved(
+            db=db,
+            prompt=request.prompt,
+        )
+    ):
+        result = replace(
+            result,
+            verdict=Verdict.PASS,
+            content=request.prompt,
+            proposed_content=None,
+        )
+
+    log = await audit_service.record_request(
+        db=db,
+        principal_id=principal.principal_id,
+        principal_type=principal.principal_type,
+        prompt=request.prompt,
+        context=None,
+        response_raw="",
+        result=result,
+        latency_ms=int((time.perf_counter() - started_at) * 1000),
+        chatbot_category=principal.chatbot_category,
+    )
+
+    if result.verdict is Verdict.REVIEW and result.proposed_content:
+        review = await review_service.create_review(
+            db=db,
+            request_log_id=log.id,
+            prompt=request.prompt,
+            proposed_response=result.proposed_content,
+            result=result,
+        )
+        await notification_service.notify_review(
+            review_id=str(review.id),
+            principal_id=principal.principal_id,
+            reason="; ".join(result.reasons),
+            risk_score=result.risk_score,
+        )
+
+    await db.commit()
 
     usage = result.usage
 
@@ -110,8 +171,11 @@ async def check_input(
 )
 async def check_output(
     request: OutputGuardrailRequest,
+    db: AsyncSession = Depends(get_db),
     principal: ApiKey = Depends(get_current_principal),
 ) -> OutputGuardrailResponse:
+
+    started_at = time.perf_counter()
 
     result = await evaluate_output(
         prompt=request.prompt,
@@ -120,6 +184,31 @@ async def check_output(
         policy=principal.security_policy,
     )
 
+    log = await audit_service.record_request(
+        db=db,
+        principal_id=principal.principal_id,
+        principal_type=principal.principal_type,
+        prompt=request.prompt,
+        context=None,
+        response_raw=request.response,
+        result=result,
+        latency_ms=int((time.perf_counter() - started_at) * 1000),
+        chatbot_category=principal.chatbot_category,
+    )
+
+    review_id = None
+    if result.verdict is Verdict.REVIEW:
+        review = await review_service.create_review(
+            db=db,
+            request_log_id=log.id,
+            prompt=request.prompt,
+            proposed_response=request.response,
+            result=result,
+        )
+        review_id = review.id
+
+    await db.commit()
+
     return OutputGuardrailResponse(
         verdict=result.verdict.value,
         content=result.content,
@@ -127,4 +216,21 @@ async def check_output(
         risk_score=result.risk_score,
         reasons=result.reasons,
         corrections_applied=result.corrections_applied,
+        review_id=review_id,
+    )
+
+
+@router.get(
+    "/reviews/{review_id}",
+    response_model=ReviewStatusResponse,
+)
+async def get_review_status(
+    review_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    principal: ApiKey = Depends(get_current_principal),
+) -> ReviewStatusResponse:
+    review = await review_service.get_review(db=db, review_id=review_id)
+    return ReviewStatusResponse(
+        resolved=review.resolved,
+        final_response=review.final_response,
     )

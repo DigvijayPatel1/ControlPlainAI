@@ -16,7 +16,7 @@ from app.core.security import (
     verify_api_key,
 )
 from app.models.api_key import ApiKey
-from app.models.common import PrincipalType, UserRole
+from app.models.common import PrincipalType
 from app.models.user import User
 from app.repositories.auth_repository import auth_repository
 from app.services.auth_service import (
@@ -311,34 +311,4 @@ async def get_current_user(
 
     return user
 
-
-async def require_reviewer(
-    db: AsyncSession = Depends(get_db),
-    credentials: HTTPAuthorizationCredentials | None = Depends(
-        _bearer_scheme
-    ),
-) -> User:
-    """
-    Authenticate the dashboard user and require reviewer/admin access.
-
-    Normal USER accounts must never be able to access the human-review
-    queue or resolve review items.
-    """
-
-    user = await get_current_user(
-        db=db,
-        credentials=credentials,
-    )
-
-    if user.role not in {
-        UserRole.USER,
-        UserRole.REVIEWER,
-        UserRole.ADMIN,
-    }:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Reviewer or admin access required.",
-        )
-
-    return user
 

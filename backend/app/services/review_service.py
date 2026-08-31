@@ -11,6 +11,7 @@ from app.models.common import ReviewAction
 from app.repositories.review_item_repositories import (
     create_review_item,
     get_by_id,
+    has_approved_prompt,
     list_pending,
     resolve_review,
 )
@@ -45,6 +46,17 @@ class ReviewService:
 
     async def get_pending(self, *, db: AsyncSession, limit: int = 100):
         return await list_pending(db, limit=max(1, min(limit, 500)))
+
+    async def prompt_was_approved(
+        self,
+        *,
+        db: AsyncSession,
+        prompt: str,
+    ) -> bool:
+        return await has_approved_prompt(
+            db,
+            prompt=prompt,
+        )
 
     async def get_review(self, *, db: AsyncSession, review_id: UUID):
         item = await get_by_id(db, review_id)
