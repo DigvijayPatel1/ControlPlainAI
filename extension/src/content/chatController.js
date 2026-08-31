@@ -1,5 +1,5 @@
 import { checkInput, checkOutput, getReviewStatus } from '../lib/api';
-import { getState, onStateChanged } from '../lib/storage';
+import { getCachedReview, getState, onStateChanged, setCachedReview } from '../lib/storage';
 import { guardBus } from './guardBus.js';
 import { getProvider } from './providers.js';
 
@@ -140,6 +140,25 @@ function wait(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Replaces the composer with `newContent` and sends it, verifying the swap
+ * actually took before allowing the send — used whenever what should be
+ * sent differs from what's currently typed (masked content, or an
+ * approved/edited review result). Returns false (and sends nothing) if the
+ * page wouldn't let the replacement take effect.
+ */
+async function replaceAndSend(originalPrompt, newContent) {
+    setPrompt(newContent);
+    await wait(120);
+    const verifiedPrompt = getPrompt();
+    const replacementDidNotStick = verifiedPrompt === originalPrompt || verifiedPrompt !== newContent;
+    if (replacementDidNotStick) {
+        return false;
+    }
+    sendNow();
+    return true;
+}
+
 // Verdicts that must NEVER auto-send — the whole point of the guardrail is
 // that these stop and wait for the user (or a reviewer) before anything
 // leaves the browser.
@@ -173,6 +192,26 @@ async function interceptSend(event) {
         event.stopImmediatePropagation();
     }
 
+    const promptHash = hashContent(prompt);
+
+    // Check the persistent review cache BEFORE calling the backend at all —
+    // same reasoning as the output side: without this, resending the exact
+    // same message that's still awaiting review creates a second, redundant
+    // review every time instead of recognizing one is already in flight.
+    const cached = await getCachedReview(promptHash);
+    if (cached?.status === 'resolved') {
+        guardBus.emit({ status: 'pass', result: { reasons: ['Approved by reviewer'] } });
+        const sent = await replaceAndSend(prompt, cached.finalContent);
+        if (!sent) {
+            guardBus.emit({ status: 'error', error: "This message was approved with edits, but this page wouldn't let ControlPlane apply them. Please paste the approved text yourself and send again." });
+        }
+        return;
+    }
+    if (cached?.status === 'pending') {
+        guardBus.emit({ status: 'review', result: { reasons: ['Still awaiting reviewer approval — not sent again to avoid duplicate reviews.'] } });
+        return;
+    }
+
     guardBus.emit({
         status: 'checking',
     });
@@ -182,21 +221,29 @@ async function interceptSend(event) {
         guardBus.emit({ status: result.verdict, result });
 
         if (result.verdict === 'pass') {
-            // Clean content, unmodified — behave like a normal chat client
+            if (result.content && result.content !== prompt) {
+                // Content differs from what's typed — either a reviewer's
+                // approved edit (the review-approval shortcut on the
+                // backend returns PASS with the reviewer's final text, not
+                // the raw prompt) or a token-optimized rewrite. Either way,
+                // sendNow() alone would send the RAW box contents and
+                // silently ignore this — which was the exact bug that let
+                // an approved-with-edits message go out unmodified.
+                const sent = await replaceAndSend(prompt, result.content);
+                if (!sent) {
+                    guardBus.emit({ status: 'error', error: "ControlPlane couldn't safely apply the approved/optimized text to this page. Please copy it manually and send again." });
+                }
+                return;
+            }
+            // Unmodified clean content — behave like a normal chat client
             // and send it immediately.
             sendNow();
             return;
         }
 
         if (result.verdict === 'mask' && result.optimized_content) {
-            setPrompt(result.optimized_content);
-            // Give the page's own editor a moment to process the change,
-            // then verify it actually took — do NOT trust the write blindly.
-            await wait(120);
-            const verifiedPrompt = getPrompt();
-            const redactionDidNotStick = verifiedPrompt === prompt || verifiedPrompt !== result.optimized_content;
-
-            if (redactionDidNotStick) {
+            const sent = await replaceAndSend(prompt, result.optimized_content);
+            if (!sent) {
                 // This is the failure mode that let an unredacted email
                 // through: our write didn't reach the page's real editor
                 // state. Hard stop — never send on unverified content.
@@ -204,13 +251,19 @@ async function interceptSend(event) {
                     status: 'error',
                     error: "Sensitive info was detected, but this page wouldn't let ControlPlane safely replace it in the message box. Nothing was sent — please remove the sensitive info yourself and send again.",
                 });
-                return;
             }
-            sendNow();
             return;
         }
 
-        // 'block' and 'review' fall through here and simply stay stopped —
+        if (result.verdict === 'review' && result.review_id) {
+            // Cache pending state so resending this exact message (or a
+            // refresh, in the output-check case) doesn't spam duplicate
+            // reviews while this one is still open.
+            await setCachedReview(promptHash, { status: 'pending', reviewId: result.review_id });
+            return;
+        }
+
+        // 'block' falls through here and simply stays stopped —
         // BLOCKING_VERDICTS exists so this behavior is explicit rather than
         // "whatever didn't match the cases above."
         if (!BLOCKING_VERDICTS.has(result.verdict) && result.verdict !== 'mask') {
@@ -235,6 +288,16 @@ function getAssistantText(node) {
         node?.innerText?.trim()
         ?? ''
     );
+}
+
+// Small, fast, non-cryptographic hash — good enough to key a local cache by
+// content, not to defeat an adversary. djb2.
+function hashContent(text) {
+    let hash = 5381;
+    for (let i = 0; i < text.length; i += 1) {
+        hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
+    }
+    return String(hash >>> 0);
 }
 
 function applyResponseCorrection(
@@ -297,6 +360,32 @@ async function evaluateAssistantMessage(node) {
     if (!content)
         return;
 
+    // Check the persistent cache BEFORE calling the backend at all. This is
+    // what actually fixes "refresh re-triggers human review forever": a
+    // refresh re-renders every historical message as a brand-new DOM node
+    // with no in-memory state, so without this cache every single one would
+    // re-run checkOutput from scratch and (previously) create a duplicate
+    // review each time.
+    const contentHash = hashContent(content);
+    const cached = await getCachedReview(contentHash);
+    if (cached?.status === 'resolved') {
+        applyResponseCorrection(node, cached.finalContent);
+        guardBus.emit({ status: 'response-pass' });
+        return;
+    }
+    if (cached?.status === 'pending') {
+        // A review is already in flight for this exact content (started
+        // before a refresh killed the previous poll, most likely). Resume
+        // polling against the same review_id instead of creating another
+        // review via a fresh checkOutput call.
+        node.style.visibility = 'hidden';
+        node.dataset.controlplaneChecked = 'true';
+        guardBus.emit({ status: 'checking-response' });
+        await waitForReviewResolution(node, cached.reviewId, content, contentHash);
+        node.style.visibility = '';
+        return;
+    }
+
     checkingResponseNodes.add(node);
 
     node.dataset.controlplaneChecked =
@@ -347,7 +436,8 @@ async function evaluateAssistantMessage(node) {
         }
 
         if (result.verdict === 'review' && result.review_id) {
-            await waitForReviewResolution(node, result.review_id, content);
+            await setCachedReview(contentHash, { status: 'pending', reviewId: result.review_id });
+            await waitForReviewResolution(node, result.review_id, content, contentHash);
         }
 
         node.style.visibility = '';
@@ -484,13 +574,24 @@ export function installInterceptor() {
     installResponseObserver();
 }
 
-async function waitForReviewResolution(node, reviewId, originalContent) {
+async function waitForReviewResolution(node, reviewId, originalContent, contentHash) {
     for (let attempt = 0; attempt < 60; attempt += 1) {
         await wait(2000);
         const review = await getReviewStatus(reviewId);
         if (review.resolved) {
-            applyResponseCorrection(node, review.final_response || originalContent);
-            node.style.visibility = '';
+            const finalContent = review.final_response || originalContent;
+            await setCachedReview(contentHash, { status: 'resolved', finalContent });
+            // The page's own SPA may have replaced this exact DOM node
+            // during the (up to 2-minute) wait — e.g. a re-render, a scroll
+            // recycling a virtualized list item, or the user navigating
+            // away and back. Guard against writing into a detached node;
+            // the cache write above still ensures the NEXT time this
+            // content is evaluated (even against a brand-new node) it
+            // resolves instantly rather than re-triggering a review.
+            if (node.isConnected) {
+                applyResponseCorrection(node, finalContent);
+                node.style.visibility = '';
+            }
             guardBus.emit({ status: 'response-pass' });
             return;
         }
