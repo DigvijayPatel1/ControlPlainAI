@@ -1,0 +1,108 @@
+"""API endpoints for human-review queue operations."""
+
+from __future__ import annotations
+
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_current_user
+from app.core.database import get_db
+from app.models.common import ReviewAction
+from app.models.user import User
+from app.schemas.review_item import (
+    ReviewDecisionRequest,
+    ReviewDecisionResult,
+    ReviewItem,
+)
+from app.services.review_service import (
+    ReviewAlreadyResolvedError,
+    ReviewNotFoundError,
+    review_service,
+)
+
+router = APIRouter(
+    prefix="/v1/admin/reviews",
+    tags=["reviews"],
+)
+
+
+@router.get("", response_model=list[ReviewItem])
+async def get_reviews(
+    limit: int = Query(default=100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[ReviewItem]:
+    """Return unresolved review items, oldest first."""
+
+    return await review_service.get_pending(
+        db=db,
+        limit=limit,
+    )
+
+
+@router.get("/{review_id}", response_model=ReviewItem)
+async def get_review(
+    review_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ReviewItem:
+    """Return a single review item."""
+
+    try:
+        return await review_service.get_review(
+            db=db,
+            review_id=review_id,
+        )
+    except ReviewNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Review item not found.",
+        ) from exc
+
+
+@router.post(
+    "/{review_id}/resolve",
+    response_model=ReviewDecisionResult,
+)
+async def resolve_review(
+    review_id: UUID,
+    resolution: ReviewDecisionRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ReviewDecisionResult:
+    """Resolve a pending review item."""
+
+    try:
+        item = await review_service.resolve(
+            db=db,
+            review_id=review_id,
+            reviewer_id="demo-reviewer",
+            action=resolution.action,
+            final_response=resolution.edited_content or "",
+        )
+
+    except ReviewNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Review item not found.",
+        ) from exc
+
+    except ReviewAlreadyResolvedError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+        ) from exc
+
+    final_response = (
+        item.final_response
+        or item.proposed_response
+    )
+
+    return ReviewDecisionResult(
+        review_id=item.id,
+        action_taken=item.action_taken or ReviewAction.APPROVE,
+        final_response=final_response,
+        resolved_by=item.resolved_by or "demo-reviewer",
+    )
